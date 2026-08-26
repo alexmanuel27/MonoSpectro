@@ -1,3 +1,12 @@
+# MonoSpectro web app (Raspberry Pi)
+#
+# NOTE: picamera2 is NOT installed with pip. It ships with Raspberry Pi OS:
+#   sudo apt install -y python3-picamera2
+# and the venv must be created with --system-site-packages to see it.
+
 Flask==3.0.3
 opencv-python-headless==4.9.0.80
 numpy==1.26.4
+pandas==2.2.2
+openpyxl==3.1.5
+xlrd==2.0.1
