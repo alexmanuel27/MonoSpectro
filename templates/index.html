@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Espectrómetro Dual Pro - V7</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: sans-serif; background: #121212; color: white; margin: 0; display: flex; height: 100vh; overflow: hidden; }
+        .main { flex: 3; padding: 15px; display: flex; flex-direction: column; }
+        .side { flex: 1; background: #1e1e1e; padding: 20px; border-left: 1px solid #333; overflow-y: auto; }
+        .video-wrapper { position: relative; width: 100%; background: black; border-radius: 8px; overflow: hidden; border: 1px solid #444; }
+        #videoFeed { width: 100%; display: block; }
+        #roiBox { position: absolute; border: 2px solid #00ff00; pointer-events: none; z-index: 10; }
+        .controls { margin-top: 15px; display: flex; gap: 8px; flex-wrap: wrap; }
+        .graph-wrapper { flex-grow: 1; margin-top: 15px; background: #1a1a1a; border-radius: 8px; padding: 10px; border: 1px solid #333; }
+        button { padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; color: white; }
+        .btn-blue { background: #2563eb; } .btn-green { background: #10b981; } .btn-pink { background: #db2777; } .btn-purple { background: #8b5cf6; }
+        input[type="text"] { background: #2a2a2a; color: white; border: 1px solid #444; padding: 8px; width: 75px; text-align: center; }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; justify-content: center; align-items: center; }
+        .modal { background: white; color: black; padding: 25px; border-radius: 12px; width: 85%; }
+        .cal-active { outline: 3px solid #db2777; }
+    </style>
+</head>
+<body>
+    <div class="main">
+        <div class="video-wrapper">
+            <img id="videoFeed" src="/video_feed">
+            <div id="roiBox"></div>
+        </div>
+        <div class="controls">
+            <input type="text" id="roi1" value="100;300"> <input type="text" id="roi2" value="1100;420">
+            <button onclick="updateROI()" class="btn-blue">ROI</button>
+            <button onclick="takeRef()" style="background:#4b5563">Blanco</button>
+            <button onclick="saveAbs()" class="btn-green">Guardar Abs</button>
+            <button id="calBtn" onclick="toggleCalMode()" class="btn-pink">Calibrar Picos (OFF)</button>
+            <button onclick="openSampleModal()" class="btn-purple">Sincronizar</button>
+        </div>
+        <div id="chartContainer" class="graph-wrapper"><canvas id="mainChart"></canvas></div>
+    </div>
+    <div class="side">
+        <h3>Calibración Manual</h3>
+        <ul id="puntosLista" style="font-size:0.85em; color:#ccc"></ul>
+        <button id="btnSubmitCal" onclick="submitManualCal()" class="btn-blue" style="display:none; width:100%">Calcular</button>
+        <button onclick="clearPoints()" style="background:#444; width:100%; margin-top:5px; font-size:0.7em">Limpiar</button>
+        <hr style="border:0; border-top:1px solid #333; margin:20px 0">
+        <h3>Cámara</h3>
+        Exp: <input type="range" min="1" max="100" value="50" oninput="setCam('exposure', this.value)" style="width:100%"><br><br>
+        Gain: <input type="range" min="1" max="20" value="10" oninput="setCam('gain', this.value)" style="width:100%">
+    </div>
+
+    <div id="sampleModal" class="modal-overlay">
+        <div class="modal">
+            <h2>Sincronización de Muestras</h2>
+            <table id="sampleTable" style="width:100%; text-align:left;">
+                <thead><tr><th>#</th><th>Nuestro (DIY)</th><th>Comercial</th></tr></thead>
+                <tbody></tbody>
+            </table><br>
+            <button onclick="addSampleRow()" class="btn-green">+ Fila</button>
+            <button onclick="submitSamples()" class="btn-purple">Sincronizar</button>
+            <button onclick="closeModals()" style="background:gray">Cerrar</button>
+        </div>
+    </div>
+    <script src="/static/script.js"></script>
+</body>
+</html>
