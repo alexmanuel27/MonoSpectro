@@ -26,14 +26,39 @@ passes through the sample, is dispersed across the camera sensor, and a browser
 interface reads out the spectrum live, lets you take a blank reference, and exports
 absorbance as CSV.
 
-The interesting part is not the optics — plenty of DIY spectrometers exist. It is the
-**calibration pipeline**: MonoSpectro maps its own pixel/intensity space onto the
-wavelength and absorbance scale of a reference instrument, so the numbers it produces
-are comparable to a real lab spectrophotometer instead of being arbitrary units.
+It exists for a specific job: **measuring chlorophyll in water from a buoy**. That
+constraint drives every design decision here — it has to be cheap enough to leave
+outdoors, run unattended off a Raspberry Pi, and be serviced by whoever is on the boat
+that day. A lab spectrophotometer is none of those things.
+
+The interesting part is therefore not the optics — plenty of DIY spectrometers exist.
+It is the **calibration pipeline**: MonoSpectro maps its own pixel/intensity space onto
+the wavelength and absorbance scale of a reference instrument, so the numbers it
+produces are comparable to a real lab spectrophotometer instead of being arbitrary
+units.
+
+### Where this is going
+
+The end goal is a **spectrofluorometer** in a cross-shaped geometry: a cuvette with four
+optical faces, the horizontal axis carrying a white LED and this monochrome camera for
+absorbance, and the vertical axis carrying excitation LEDs — a 430 nm blue for
+chlorophyll — with an 18-channel AS7265x sensor reading the fluorescent emission at
+right angles to the excitation beam.
+
+That split is deliberate. Earlier work compared three low-cost platforms (an 18-channel
+AS7265x sensor, a Paton Hawksley pocket spectroscope, and a Little Garden
+spectrometer) and found the discrete sensor reproducible and robust but coarse, while
+imaging systems gave far better spectral fidelity. It also found a strong dependence on
+the light source: **imaging systems want a halogen lamp** (continuous spectrum), while
+**the AS7265x is more stable under white LEDs**. Each half of the instrument therefore
+plays to its own strength — camera for spectral shape, discrete sensor for sensitive
+fluorescence quantification.
+
+The camera side is what this repository covers. It is the part that is built.
 
 | | |
 | --- | --- |
-| **Validated range** | 400–800 nm against a commercial spectrophotometer |
+| **Validated range** | 400–800 nm against a commercial spectrophotometer (r² 0.89–0.98) |
 | **Sensor** | 1280×720 monochrome, global shutter, 8-bit |
 | **Grating** | 1000 lines/mm transmission film, first order |
 | **Detector** | Camera-based — no moving parts, whole spectrum captured at once |
@@ -42,27 +67,47 @@ are comparable to a real lab spectrophotometer instead of being arbitrary units.
 
 ## Does it actually work?
 
-Yes — after calibration. The same set of samples was measured on MonoSpectro and on a
-commercial spectrophotometer. Solid lines are MonoSpectro, dashed black is the
-reference instrument.
+The same four samples were measured on MonoSpectro and on a **K Lab Alpha**
+bench spectrophotometer, following the standardised solution protocol developed by
+Dr. Dayaris Hernández and Dr. Aramis Rivera. Blue is MonoSpectro, dashed grey is the reference instrument.
 
-**Before calibration** — the peaks are there, the scale is not:
-
-<p align="center">
-  <img src="docs/images/validation_uncalibrated_vs_reference.png" width="760"
-       alt="Uncalibrated MonoSpectro vs reference spectrophotometer">
-</p>
-
-**After calibration** — the corrected curves track the reference across the band:
+**As measured** — the peaks land at the right wavelengths, but the absorbance scale is
+compressed to roughly a third of the reference:
 
 <p align="center">
-  <img src="docs/images/validation_calibrated_vs_reference.png" width="760"
-       alt="Calibrated MonoSpectro vs reference spectrophotometer">
+  <img src="docs/images/validation_raw_vs_reference.png" width="760"
+       alt="MonoSpectro vs reference spectrophotometer, as measured">
 </p>
 
-Test set: methylene blue, rhodanine, Congo red and a brilliant-blue dilution, measured
-against a commercial reference instrument. Reproduce the figures yourself with
+**After one linear scale factor per sample** — the curves sit on top of the reference:
+
+<p align="center">
+  <img src="docs/images/validation_scaled_vs_reference.png" width="760"
+       alt="MonoSpectro rescaled vs reference spectrophotometer">
+</p>
+
+| Sample | Peak (MonoSpectro / reference) | Scale factor | r² |
+| --- | --- | --- | --- |
+| Bromothymol blue (1.5 g/L) | 456 / 434 nm | ×4.19 | 0.893 |
+| Congo red | 487 / 500 nm | ×2.75 | 0.983 |
+| Rhodamine B | 546 / 548 nm | ×2.94 | 0.951 |
+| Methylene blue | 658 / 664 nm | ×1.87 | 0.917 |
+
+Reproduce the figures and the table with
 [`tools/compare_reference.py`](tools/compare_reference.py).
+
+**What this does and does not show.** The spectral *shape* is reproduced well — band
+positions and widths follow the reference closely, which is the hard part, and three of
+the four samples land within 6 nm of the reference peak. What is not solved yet is a
+single instrument-wide response function: each sample needs its own scale factor, so
+MonoSpectro currently reads *relative* spectra rather than calibrated absolute
+absorbance. The blue end is the weakest — the first sample peaks 22 nm high, where the
+wavelength fit has the fewest reference lines to work from.
+
+Note that the scale factors above are fitted against the same measurements they are
+shown on. They demonstrate that one linear factor is *enough* to reconcile the two
+instruments; they are not a blind prediction. A response function fitted on one set of
+samples and tested on a different set is the next step.
 
 ## How it works
 
@@ -91,9 +136,13 @@ flowchart LR
 
 ## Hardware
 
-<!-- TODO: exploded CAD render from Fusion -> docs/images/cad_exploded.png
-<p align="center"><img src="docs/images/cad_exploded.png" width="700" alt="CAD exploded view"></p>
--->
+<p align="center">
+  <img src="docs/images/cad_assembly.png" width="720"
+       alt="CAD render of the assembled instrument">
+</p>
+
+<p align="center"><i>The assembled instrument: electronics enclosure on the left, cuvette
+holder in the middle, and the angled optical head on the right carrying the camera.</i></p>
 
 | Part | Spec | Notes |
 | --- | --- | --- |
@@ -102,7 +151,7 @@ flowchart LR
 | Grating | [Edmund Optics #4621](https://www.edmundoptics.eu/p/25400-linesinch-6quot-x-12quot-sheets-2pack/4621/) — 25,400 lines/inch ≈ **1000 lines/mm** | Transmission film, cut from a 6"×12" sheet and **bonded directly to the lens** |
 | Grating angle | 36° to the incident beam | Places the mid-band on the optical axis |
 | Entrance slit | 0.5 mm wide | Sets the spectral resolution together with the dispersion |
-| Slit → camera | 50 mm | No collimating optics between them |
+| Slit → camera | 5 mm | No collimating optics between them |
 | Light source | 10 W halogen lamp | Continuous spectrum across the visible band |
 | Cuvette | Standard 10 mm path length | Ordinary lab cuvettes — nothing custom |
 | Computer | Raspberry Pi 4 | Runs the Flask app and the camera stack |
@@ -114,8 +163,16 @@ flowchart LR
 
 ### Optical layout
 
+<p align="center">
+  <img src="docs/images/cad_internal_layout.png" width="420"
+       alt="Internal layout: the camera and grating tilted 36 degrees inside the light-tight body">
+</p>
+
+<p align="center"><i>Inside the light-tight body: the camera and its bonded grating sit on a
+bracket tilted 36°, facing the entrance slit in the base.</i></p>
+
 There is no collimator. The grating sits directly on the lens, and the 0.5 mm slit at
-50 mm does the work of defining the beam — a deliberately simple geometry that trades
+5 mm does the work of defining the beam — a deliberately simple geometry that trades
 some throughput for a build anyone can reproduce without an optical bench.
 
 For a 1000 lines/mm grating at normal incidence, the first order lands at:
@@ -137,6 +194,57 @@ Two things matter more than optical precision here:
 > **Known limitation:** the NoIR camera carries no IR-cut filter and the sensor responds
 > out to roughly 1000 nm, so near-infrared leaks into the measurement. A BG38 or UG11
 > filter would fix it. This build does not have one.
+
+## Known deviations, and why they happen
+
+The wavelength axis is systematically wrong at the blue end and close to right
+everywhere else. Against the reference instrument the error runs to tens of nanometres
+below 500 nm and settles to roughly 5 nm across green and red. That pattern is not
+random noise, and three coupled causes account for it.
+
+**1. The grating is not linear, and the first calibration assumed it was.**
+For a transmission grating the first-order maxima follow
+
+```
+m·lambda = d·(sin(theta_i) + sin(theta_m))
+```
+
+Because the diffraction angle enters through a sine, projecting the spectrum onto a
+*flat* sensor makes wavelength a non-linear function of pixel position — and the higher
+the line density, the worse it gets. At 1000 lines/mm the non-linearity is most severe
+in the blue. The original calibration fitted a straight line, which cannot describe
+that. A second-order fit from at least three known lines — the mercury peaks of a
+compact fluorescent lamp — is the minimum honest model.
+
+**2. The lens distorts the image.**
+The grating is bonded to a commercial M12 lens that was never designed for
+spectroscopy, so it carries barrel or pincushion distortion. Real pixel position
+deviates radially from the ideal:
+
+```
+x' = x·(1 + k1·r^2 + k2·r^4)
+```
+
+The effect is worst at the sensor edges — exactly where the blue end of the spectrum
+lands. Two ways out: characterise the distortion with a grid target and undo it in
+OpenCV before extracting the spectrum, or drop the lens entirely and mount the bare
+CMOS sensor against the body with the grating as the only optical element.
+
+**3. The tilted sensor changes magnification across the spectrum.**
+With the camera tilted 36°, different wavelengths travel slightly different optical
+path lengths to reach the sensor, so the system's effective magnification is not
+constant across the spectrum width. A rational function
+
+```
+lambda = (A + B·x) / (1 + C·x)
+```
+
+fitted by least squares approximates that trigonometry better than a quadratic, because
+it can bend asymptotically the way the geometry actually does.
+
+None of these is fixed yet. They are written down because anyone reproducing this build
+will meet the same three problems, and knowing which one you are looking at is most of
+the work.
 
 ## Install
 
@@ -169,6 +277,9 @@ pip install -r tools/requirements.txt
 ```
 
 ## Using it
+
+> Full walkthrough of the interface, both calibration methods, the HTTP API and the
+> field setup: **[docs/software.md](docs/software.md)**.
 
 1. **Frame the spectrum.** Adjust exposure and gain in the sidebar until the spectral
    line is bright but not clipped, then set the ROI (`x;y` for the top-left and
@@ -220,7 +331,9 @@ This file is **device-specific** and gitignored — yours will differ from the e
 ├── tools/
 │   └── compare_reference.py   # Validate against a reference instrument
 ├── hardware/                  # 3D-printable enclosure (STEP / STL)
-├── docs/images/               # Figures and photos
+├── docs/
+│   ├── software.md            # Full guide to the interface and the API
+│   └── images/                # Figures, renders and screenshots
 └── calibration.example.json   # Starting point for your own calibration
 ```
 
@@ -229,6 +342,8 @@ processed figures are.
 
 ## Roadmap
 
+- [ ] A single instrument-wide response function, so absorbance is absolute
+      rather than one scale factor per sample
 - [ ] Publish the enclosure CAD (STEP + STL) and a full bill of materials
 - [ ] Fluorescence mode — blue LED excitation for chlorophyll (~450 nm in, ~685 nm out),
       which is what this instrument was built for

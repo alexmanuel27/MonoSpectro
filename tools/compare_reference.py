@@ -2,28 +2,23 @@
 """
 Compare MonoSpectro measurements against a reference (commercial) spectrophotometer.
 
-Applies a wavelength-dependent quadratic response correction to the raw DIY
-absorbance values and plots them, channel by channel, against the reference
-instrument -- once before correction and once after.
+Produces two figures:
 
-The correction table is a CSV with one row per wavelength:
+  validation_raw_vs_reference.png      as measured, both instruments on one axis
+  validation_scaled_vs_reference.png   MonoSpectro rescaled by a single linear
+                                       factor per channel, with r^2 annotated
 
-    Nanometers,coef_A,coef_B,coef_C
-    400.18,3.2260,-5.9454,1.8059
-    ...
-
-and is applied as:  A_corrected = a*x^2 + b*x + c
+and prints the agreement statistics it used.
 
 Usage
 -----
     python tools/compare_reference.py \
-        --calibration calibration.csv \
-        --measured    my_run.xls \
-        --reference   reference_run.xls \
-        --outdir      docs/images
+        --measured  my_run.xls \
+        --reference reference_run.xls \
+        --outdir    docs/images
 
-Both spectra files are read with pandas; column 0 must be the wavelength and
-every remaining column one measurement channel.
+Column 0 of each file must be the wavelength; every remaining column is one
+measurement channel. Channels are paired in order.
 """
 
 import argparse
@@ -31,18 +26,23 @@ import os
 
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-WL_MIN_DEFAULT = 400.0
-WL_MAX_DEFAULT = 800.0
+WL_MIN_DEFAULT, WL_MAX_DEFAULT = 400.0, 800.0
 
-SERIES_COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
-                 "#9467bd", "#8c564b", "#e377c2", "#7f7f7f"]
+INK          = "#0b0b0b"
+INK_SOFT     = "#52514e"
+GRID         = "#e6e5e1"
+SURFACE      = "#fcfcfb"
+SERIES_DIY   = "#2a78d6"   # MonoSpectro
+SERIES_REF   = "#52514e"   # reference instrument (neutral baseline)
 
 
 def load_spectra(path):
-    """Read a spectra table, tolerating the pipe-padded export some
-    instruments produce. Returns a DataFrame: Wavelength + Ch_1..Ch_n."""
+    """Read a spectra table, tolerating the pipe-padded export some instruments
+    produce. Returns a DataFrame: Wavelength + Ch_1..Ch_n."""
     df = pd.read_excel(path) if path.lower().endswith((".xls", ".xlsx")) else pd.read_csv(path)
 
     def clean(series):
@@ -57,43 +57,64 @@ def load_spectra(path):
     return out.dropna(subset=["Wavelength"])
 
 
-def apply_correction(wavelengths, raw, cal):
-    """Interpolate the per-wavelength quadratic coefficients onto the measured
-    grid and apply them to every channel at once."""
-    a = np.interp(wavelengths, cal.index.values, cal["coef_A"].values)
-    b = np.interp(wavelengths, cal.index.values, cal["coef_B"].values)
-    c = np.interp(wavelengths, cal.index.values, cal["coef_C"].values)
-    return a[:, None] * raw**2 + b[:, None] * raw + c[:, None]
+def style_axes(ax, wl_min, wl_max):
+    ax.set_facecolor(SURFACE)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        ax.spines[side].set_color(GRID)
+        ax.spines[side].set_linewidth(1)
+    ax.grid(True, axis="y", color=GRID, linewidth=1, alpha=0.9)
+    ax.set_axisbelow(True)
+    ax.tick_params(colors=INK_SOFT, labelsize=9, length=0)
+    ax.set_xlim(wl_min, wl_max)
+    ax.set_xticks(np.arange(wl_min, wl_max + 1, 100))
 
 
-def plot_comparison(wl_m, data_m, wl_r, data_r, label, outfile, wl_min, wl_max):
-    n = data_m.shape[1]
-    ncols = min(2, n)
+def plot_panel(ax, wl_d, diy, wl_r, ref, title, note, wl_min, wl_max):
+    style_axes(ax, wl_min, wl_max)
+    ax.plot(wl_r, ref, color=SERIES_REF, linewidth=2, linestyle=(0, (5, 3)),
+            label="Reference instrument", zorder=2)
+    ax.plot(wl_d, diy, color=SERIES_DIY, linewidth=2,
+            label="MonoSpectro", zorder=3)
+    ax.set_title(title, fontsize=11, color=INK, loc="left", pad=8, fontweight="bold")
+    if note:
+        ax.text(0.98, 0.94, note, transform=ax.transAxes, ha="right", va="top",
+                fontsize=9, color=INK_SOFT)
+
+
+def build_figure(channels, wl_min, wl_max, suptitle, subtitle, outfile):
+    n = len(channels)
+    ncols = 2 if n > 1 else 1
     nrows = int(np.ceil(n / ncols))
 
-    fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows), squeeze=False)
-    axes = axes.flatten()
+    fig, axes = plt.subplots(nrows, ncols, figsize=(5.4 * ncols, 3.6 * nrows),
+                             squeeze=False, facecolor=SURFACE)
+    flat = axes.flatten()
 
-    for i in range(n):
-        ax = axes[i]
-        ax.plot(wl_m, data_m[:, i], color=SERIES_COLORS[i % len(SERIES_COLORS)],
-                linewidth=2, label=f"MonoSpectro ({label})")
-        ax.plot(wl_r, data_r[:, i], color="black", linestyle="--",
-                linewidth=1.6, label="Reference instrument")
-        ax.set_title(f"Channel {i + 1}", fontsize=13, fontweight="bold")
-        ax.set_xlabel("Wavelength (nm)")
-        ax.set_ylabel("Absorbance")
-        ax.set_xlim(wl_min, wl_max)
-        ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=9)
+    for ax, ch in zip(flat, channels):
+        plot_panel(ax, ch["wl_d"], ch["diy"], ch["wl_r"], ch["ref"],
+                   ch["title"], ch["note"], wl_min, wl_max)
+    for ax in flat[n:]:
+        ax.set_visible(False)
 
-    for j in range(n, len(axes)):
-        axes[j].set_visible(False)
+    for row in range(nrows):
+        axes[row][0].set_ylabel("Absorbance", fontsize=10, color=INK_SOFT)
+    for col in range(ncols):
+        axes[nrows - 1][col].set_xlabel("Wavelength (nm)", fontsize=10, color=INK_SOFT)
+        if nrows * ncols > n and n % ncols and col >= n % ncols:
+            axes[nrows - 2][col].set_xlabel("Wavelength (nm)", fontsize=10, color=INK_SOFT)
 
-    fig.suptitle(f"MonoSpectro {label} vs reference spectrophotometer",
-                 fontsize=15, fontweight="bold")
-    fig.tight_layout()
-    fig.savefig(outfile, dpi=200, bbox_inches="tight")
+    fig.suptitle(suptitle, fontsize=14, color=INK, fontweight="bold", x=0.055, ha="left", y=0.975)
+    fig.text(0.055, 0.932, subtitle, fontsize=10, color=INK_SOFT, ha="left")
+
+    handles, labels = flat[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper right", bbox_to_anchor=(0.975, 0.978),
+               frameon=False, fontsize=10, labelcolor=INK_SOFT, ncols=2, handlelength=2.4)
+
+    fig.tight_layout(rect=(0.015, 0.01, 0.985, 0.905))
+    fig.subplots_adjust(hspace=0.32)
+    fig.savefig(outfile, dpi=200, facecolor=SURFACE)
     plt.close(fig)
     print(f"saved: {outfile}")
 
@@ -101,42 +122,59 @@ def plot_comparison(wl_m, data_m, wl_r, data_r, label, outfile, wl_min, wl_max):
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--calibration", required=True, help="response-correction CSV")
     p.add_argument("--measured", required=True, help="MonoSpectro spectra (.csv/.xls/.xlsx)")
     p.add_argument("--reference", required=True, help="reference spectra (.csv/.xls/.xlsx)")
-    p.add_argument("--outdir", default=".", help="where to write the figures")
+    p.add_argument("--outdir", default=".")
+    p.add_argument("--labels", default="", help="comma-separated channel names")
     p.add_argument("--wl-min", type=float, default=WL_MIN_DEFAULT)
     p.add_argument("--wl-max", type=float, default=WL_MAX_DEFAULT)
     args = p.parse_args()
 
     os.makedirs(args.outdir, exist_ok=True)
 
-    cal = pd.read_csv(args.calibration).set_index("Nanometers").sort_index()
-    df_m = load_spectra(args.measured)
-    df_r = load_spectra(args.reference)
+    df_d, df_r = load_spectra(args.measured), load_spectra(args.reference)
+    md = df_d["Wavelength"].between(args.wl_min, args.wl_max)
+    mr = df_r["Wavelength"].between(args.wl_min, args.wl_max)
+    wl_d = df_d.loc[md, "Wavelength"].values
+    wl_r = df_r.loc[mr, "Wavelength"].values
+    diy = df_d.loc[md].drop(columns="Wavelength").values
+    ref = df_r.loc[mr].drop(columns="Wavelength").values
 
-    mask_m = df_m["Wavelength"].between(args.wl_min, args.wl_max)
-    mask_r = df_r["Wavelength"].between(args.wl_min, args.wl_max)
-
-    wl_m = df_m.loc[mask_m, "Wavelength"].values
-    wl_r = df_r.loc[mask_r, "Wavelength"].values
-    raw_m = df_m.loc[mask_m].drop(columns="Wavelength").values
-    raw_r = df_r.loc[mask_r].drop(columns="Wavelength").values
-
-    n = min(raw_m.shape[1], raw_r.shape[1])
+    n = min(diy.shape[1], ref.shape[1])
     if n == 0:
         raise SystemExit("No channels in common between the two files.")
-    raw_m, raw_r = raw_m[:, :n], raw_r[:, :n]
-    print(f"comparing {n} channel(s) over {args.wl_min:.0f}-{args.wl_max:.0f} nm")
+    diy, ref = diy[:, :n], ref[:, :n]
 
-    corrected = apply_correction(wl_m, raw_m, cal)
+    names = [s.strip() for s in args.labels.split(",")] if args.labels else []
+    names += [f"Channel {i + 1}" for i in range(len(names), n)]
 
-    plot_comparison(wl_m, raw_m, wl_r, raw_r, "uncorrected",
-                    os.path.join(args.outdir, "validation_uncalibrated_vs_reference.png"),
-                    args.wl_min, args.wl_max)
-    plot_comparison(wl_m, corrected, wl_r, raw_r, "calibrated",
-                    os.path.join(args.outdir, "validation_calibrated_vs_reference.png"),
-                    args.wl_min, args.wl_max)
+    raw_panels, scaled_panels = [], []
+    print(f"{'channel':<20} {'slope':>8} {'offset':>8} {'r2':>7} {'RMSE':>8}  peak DIY / ref")
+    for i in range(n):
+        ref_on_d = np.interp(wl_d, wl_r, ref[:, i])
+        slope, offset = np.polyfit(diy[:, i], ref_on_d, 1)
+        fitted = slope * diy[:, i] + offset
+        r2 = np.corrcoef(fitted, ref_on_d)[0, 1] ** 2
+        rmse = float(np.sqrt(np.mean((fitted - ref_on_d) ** 2)))
+        pk_d, pk_r = wl_d[np.argmax(diy[:, i])], wl_r[np.argmax(ref[:, i])]
+        print(f"{names[i]:<20} {slope:8.2f} {offset:+8.3f} {r2:7.3f} {rmse:8.3f}"
+              f"  {pk_d:.0f} / {pk_r:.0f} nm  ({pk_d - pk_r:+.0f})")
+
+        raw_panels.append(dict(wl_d=wl_d, diy=diy[:, i], wl_r=wl_r, ref=ref[:, i],
+                               title=names[i], note=""))
+        scaled_panels.append(dict(wl_d=wl_d, diy=fitted, wl_r=wl_r, ref=ref[:, i],
+                                  title=names[i],
+                                  note=f"×{slope:.2f}   r² = {r2:.2f}"))
+
+    build_figure(raw_panels, args.wl_min, args.wl_max,
+                 "As measured",
+                 "Raw absorbance from both instruments on the same axis — the shape is there, the scale is not.",
+                 os.path.join(args.outdir, "validation_raw_vs_reference.png"))
+
+    build_figure(scaled_panels, args.wl_min, args.wl_max,
+                 "After a single linear scale factor per channel",
+                 "One slope and offset per sample, fitted against the reference instrument.",
+                 os.path.join(args.outdir, "validation_scaled_vs_reference.png"))
 
 
 if __name__ == "__main__":
