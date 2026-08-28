@@ -1,8 +1,8 @@
 <h1 align="center">MonoSpectro</h1>
 
 <p align="center">
-  <b>An open-source visible-light spectrophotometer built around a monochrome Raspberry Pi camera —<br>
-  and calibrated until it agrees with a commercial lab instrument.</b>
+  <b>An open-source visible-light spectrophotometer built around a monochrome Raspberry Pi camera,<br>
+  with a calibration validated against a commercial lab instrument on samples it had never seen.</b>
 </p>
 
 <p align="center">
@@ -58,56 +58,90 @@ The camera side is what this repository covers. It is the part that is built.
 
 | | |
 | --- | --- |
-| **Validated range** | 400–800 nm against a commercial spectrophotometer (r² 0.89–0.98) |
+| **Validated range** | 420–780 nm, held-out validation against a K Lab Alpha |
 | **Sensor** | 1280×720 monochrome, global shutter, 8-bit |
 | **Grating** | 1000 lines/mm transmission film, first order |
 | **Detector** | Camera-based — no moving parts, whole spectrum captured at once |
 | **Readout** | Live web interface on the local network |
-| **Cost** | Roughly two orders of magnitude below the reference instrument |
+| **Calibration** | Per-wavelength response function, 40 % held-out error reduction |
 
 ## Does it actually work?
 
-The same four samples were measured on MonoSpectro and on a **K Lab Alpha**
-bench spectrophotometer, following the standardised solution protocol developed by
-Dr. Dayaris Hernández and Dr. Aramis Rivera. Blue is MonoSpectro, dashed grey is the reference instrument.
+Yes, on samples it has never seen.
 
-**As measured** — the peaks land at the right wavelengths, but the absorbance scale is
-compressed to roughly a third of the reference:
-
-<p align="center">
-  <img src="docs/images/validation_raw_vs_reference.png" width="760"
-       alt="MonoSpectro vs reference spectrophotometer, as measured">
-</p>
-
-**After one linear scale factor per sample** — the curves sit on top of the reference:
+The correction was fitted on **nine food colourings** measured in April, and then tested
+once on **four laboratory dyes** measured in May — a different session, a different
+optical configuration, and a completely different set of chemicals. Nothing from the
+test set touched the fit.
 
 <p align="center">
-  <img src="docs/images/validation_scaled_vs_reference.png" width="760"
-       alt="MonoSpectro rescaled vs reference spectrophotometer">
+  <img src="docs/images/validation_transfer_heldout.png" width="820"
+       alt="Held-out validation: uncorrected and corrected MonoSpectro spectra against the reference instrument">
 </p>
 
-| Sample | Peak (MonoSpectro / reference) | Scale factor | r² |
+| Held-out sample | RMSE uncorrected | RMSE corrected | Change |
 | --- | --- | --- | --- |
-| Bromothymol blue (1.5 g/L) | 456 / 434 nm | ×4.19 | 0.893 |
-| Congo red | 487 / 500 nm | ×2.75 | 0.983 |
-| Rhodamine B | 546 / 548 nm | ×2.94 | 0.951 |
-| Methylene blue | 658 / 664 nm | ×1.87 | 0.917 |
+| Bromothymol blue | 0.440 | 0.133 | −70 % |
+| Congo red | 0.440 | 0.254 | −42 % |
+| Rhodamine B | 0.389 | 0.280 | −28 % |
+| Methylene blue | 0.116 | 0.168 | **+45 %** |
+| **Mean** | **0.346** | **0.209** | **−40 %** |
 
-Reproduce the figures and the table with
-[`tools/compare_reference.py`](tools/compare_reference.py).
+Reproduce it with
+[`tools/calibration_transfer.py`](tools/calibration_transfer.py); the reference
+instrument is a **K Lab Alpha**, following the standardised solution protocol developed
+by Dr. Dayaris Hernández and Dr. Aramis Rivera.
 
-**What this does and does not show.** The spectral *shape* is reproduced well — band
-positions and widths follow the reference closely, which is the hard part, and three of
-the four samples land within 6 nm of the reference peak. What is not solved yet is a
-single instrument-wide response function: each sample needs its own scale factor, so
-MonoSpectro currently reads *relative* spectra rather than calibrated absolute
-absorbance. The blue end is the weakest — the first sample peaks 22 nm high, where the
-wavelength fit has the fewest reference lines to work from.
+**Methylene blue gets worse, and that is worth saying out loud.** It was already the
+closest match before any correction — 0.116, three times better than the others — and
+the correction drags it toward the average behaviour of the training set. A response
+function fitted on nine samples is a blunt instrument: it helps where the error is
+large and can hurt where the instrument already happened to agree.
 
-Note that the scale factors above are fitted against the same measurements they are
-shown on. They demonstrate that one linear factor is *enough* to reconcile the two
-instruments; they are not a blind prediction. A response function fitted on one set of
-samples and tested on a different set is the next step.
+### What the correction is
+
+A per-wavelength linear response function:
+
+```
+A_ref(λ) = a(λ)·A_diy(λ) + b(λ)
+```
+
+Gain and offset are fitted independently at every wavelength from the paired
+measurements, then smoothed along the wavelength axis so the two curves stay physical
+instead of tracking sample noise. The wavelength range, the polynomial degree and the
+smoothing window are chosen by leave-one-out **on the training set only**; the held-out
+set is scored once, at the end.
+
+Two coefficients per wavelength, each backed by nine observations. That is the whole
+model.
+
+### Why not something cleverer
+
+An earlier attempt used PLS regression to map a whole MonoSpectro spectrum onto a whole
+reference spectrum. Trained on the same nine pairs and evaluated under the same
+protocol, it reduced the held-out error by **4 %**, against 40 % for the response
+function.
+
+The reason is worth understanding before you try it yourself. A spectrum-to-spectrum
+regression learns the *shapes it was trained on*. Nine samples cannot span the space of
+things you might put in a cuvette, so on new chemistry it interpolates between
+memorised shapes and gets it wrong. The response function instead learns a property of
+the **instrument** — how far its absorbance reading deviates at each wavelength — and
+that property does not care what is in the cuvette.
+
+It is also easy to fool yourself here. The same PLS model scored on its own training
+data reaches an RMSE of 0.0000 with enough components: with nine samples and eight
+latent variables it can reproduce its inputs exactly. That number means nothing. Always
+print the do-nothing baseline next to any model score.
+
+### Spectral shape, separately
+
+Independently of the absorbance scale, the *shape* MonoSpectro records tracks the
+reference closely. Fitting a single linear factor per sample on the four May dyes gives
+r² of 0.98, 0.95, 0.92 and 0.89, with three of the four peak positions within 6 nm
+([`tools/compare_reference.py`](tools/compare_reference.py) reproduces this). Getting the
+bands in the right place with the right widths is the hard part of building a
+spectrometer; the absorbance scale is what the response function then fixes.
 
 ## How it works
 
@@ -136,20 +170,19 @@ flowchart LR
 
 ## Hardware
 
+<!-- PENDIENTE render del conjunto
 <p align="center">
   <img src="docs/images/cad_assembly.png" width="720"
        alt="CAD render of the assembled instrument">
 </p>
-
-<p align="center"><i>The assembled instrument: electronics enclosure on the left, cuvette
-holder in the middle, and the angled optical head on the right carrying the camera.</i></p>
+-->
 
 | Part | Spec | Notes |
 | --- | --- | --- |
 | Camera | [Arducam OV9281](https://eu.robotshop.com/products/arducam-ov9281-1mp-mono-global-shutter-noir-mono-mipi-camera-raspberry-pi) — 1 MP mono, global shutter, NoIR, MIPI | True monochrome sensor: every pixel is an unfiltered intensity reading |
 | Lens | 12 mm M12 | Chosen over 3 / 3.6 / 6 mm — the narrow field spreads the first order across the full sensor |
 | Grating | [Edmund Optics #4621](https://www.edmundoptics.eu/p/25400-linesinch-6quot-x-12quot-sheets-2pack/4621/) — 25,400 lines/inch ≈ **1000 lines/mm** | Transmission film, cut from a 6"×12" sheet and **bonded directly to the lens** |
-| Grating angle | 36° to the incident beam | Places the mid-band on the optical axis |
+| Camera tilt | 36° from the slit axis | Places the middle of the visible band on the optical axis |
 | Entrance slit | 0.5 mm wide | Sets the spectral resolution together with the dispersion |
 | Slit → camera | 5 mm | No collimating optics between them |
 | Light source | 10 W halogen lamp | Continuous spectrum across the visible band |
@@ -163,13 +196,12 @@ holder in the middle, and the angled optical head on the right carrying the came
 
 ### Optical layout
 
+<!-- PENDIENTE render del interior
 <p align="center">
   <img src="docs/images/cad_internal_layout.png" width="420"
        alt="Internal layout: the camera and grating tilted 36 degrees inside the light-tight body">
 </p>
-
-<p align="center"><i>Inside the light-tight body: the camera and its bonded grating sit on a
-bracket tilted 36°, facing the entrance slit in the base.</i></p>
+-->
 
 There is no collimator. The grating sits directly on the lens, and the 0.5 mm slit at
 5 mm does the work of defining the beam — a deliberately simple geometry that trades
@@ -181,7 +213,7 @@ For a 1000 lines/mm grating at normal incidence, the first order lands at:
 | --- | --- | --- | --- | --- | --- |
 | diffraction angle | 23.6° | 30.0° | 36.9° | 44.4° | 53.1° |
 
-which is why 36° puts the middle of the visible band on the camera axis and a 12 mm
+which is why tilting the camera 36° puts the middle of the visible band on its axis, and a 12 mm
 lens — rather than a wider one — keeps the whole first order on the sensor.
 
 Two things matter more than optical precision here:
@@ -268,7 +300,15 @@ python app.py
 `--system-site-packages` is not optional: `picamera2` is not installable from PyPI, so
 an isolated virtualenv cannot see the camera at all.
 
-Then open `http://<your-pi-address>:5000` from any machine on the same network.
+Then open `http://<your-pi-address>:5000` from any machine on the same network. The Pi
+can also serve as its own access point, so the instrument needs no infrastructure in the
+field — see [docs/software.md](docs/software.md) for that and for the systemd unit that
+starts it on boot.
+
+> One thing to fix before taking it anywhere without internet: `templates/index.html`
+> loads Chart.js from a CDN, so in access-point mode the chart never renders. Save
+> `chart.umd.js` into `static/chart.min.js` while the Pi is still online and point the
+> tag at the local copy.
 
 For the desktop-side analysis tools:
 
@@ -329,7 +369,8 @@ This file is **device-specific** and gitignored — yours will differ from the e
 ├── templates/index.html       # Web interface
 ├── static/                    # Front-end logic and styling
 ├── tools/
-│   └── compare_reference.py   # Validate against a reference instrument
+│   ├── calibration_transfer.py  # Fit and validate the response correction
+│   └── compare_reference.py     # Raw shape comparison against a reference
 ├── hardware/                  # 3D-printable enclosure (STEP / STL)
 ├── docs/
 │   ├── software.md            # Full guide to the interface and the API
@@ -342,11 +383,11 @@ processed figures are.
 
 ## Roadmap
 
-- [ ] A single instrument-wide response function, so absorbance is absolute
-      rather than one scale factor per sample
+- [ ] More training pairs — nine samples is thin for a response function, and
+      it currently hurts samples the instrument already read well
 - [ ] Publish the enclosure CAD (STEP + STL) and a full bill of materials
-- [ ] Fluorescence mode — blue LED excitation for chlorophyll (~450 nm in, ~685 nm out),
-      which is what this instrument was built for
+- [ ] Fluorescence mode — 430 nm blue LED excitation for chlorophyll, emission read
+      near 685 nm by the AS7265x. This is what the instrument was built for
 - [ ] IR-cut filter (BG38 / UG11) to stop NIR leakage through the NoIR sensor
 - [ ] Dark-frame subtraction to compensate sensor noise at long exposures
 - [ ] Save/load named calibration profiles instead of a single global file

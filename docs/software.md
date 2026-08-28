@@ -4,11 +4,11 @@ MonoSpectro runs as a small Flask server on the Raspberry Pi and is driven entir
 a browser on the same network. Nothing is installed on the client — you point a laptop,
 tablet or phone at the Pi and you are looking at the instrument.
 
+<!-- PENDIENTE captura de la interfaz completa
 <p align="center">
   <img src="images/ui_main.png" width="820" alt="MonoSpectro web interface">
 </p>
-
-<p align="center"><i>The whole instrument is this one screen.</i></p>
+-->
 
 ---
 
@@ -45,9 +45,11 @@ freezes, the stream will usually keep running, and vice versa.
 
 ### The camera view
 
+<!-- PENDIENTE captura de la vista de camara con el ROI
 <p align="center">
   <img src="images/ui_roi.png" width="620" alt="Camera view with the ROI box over the spectral line">
 </p>
+-->
 
 The live grayscale image from the OV9281. The dispersed spectrum appears as a bright
 horizontal streak. The green rectangle is the **ROI** — the only part of the sensor that
@@ -141,9 +143,11 @@ start.
 
 ### Method 1 — known emission lines
 
+<!-- PENDIENTE captura del modo calibracion
 <p align="center">
   <img src="images/ui_calibration.png" width="620" alt="Calibration mode with points picked on the chart">
 </p>
+-->
 
 1. Shine a source with known lines through the instrument. A compact fluorescent lamp is
    ideal — its mercury lines at **436, 546 and 611 nm** are sharp and unmistakable.
