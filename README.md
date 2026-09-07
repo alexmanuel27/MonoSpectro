@@ -63,7 +63,7 @@ The camera side is what this repository covers. It is the part that is built.
 | **Grating** | 1000 lines/mm transmission film, first order |
 | **Detector** | Camera-based — no moving parts, whole spectrum captured at once |
 | **Readout** | Live web interface on the local network |
-| **Calibration** | Joint Chebyshev response function, 51 % held-out error reduction |
+| **Calibration** | Joint Chebyshev response function, 71 % held-out error reduction |
 
 ## Does it actually work?
 
@@ -81,22 +81,36 @@ test set touched the fit.
 
 | Held-out sample | RMSE uncorrected | RMSE corrected | Change |
 | --- | --- | --- | --- |
-| Bromothymol blue | 0.440 | 0.188 | −57 % |
-| Congo red | 0.440 | 0.249 | −43 % |
-| Rhodamine B | 0.389 | 0.157 | −60 % |
-| Methylene blue | 0.116 | 0.086 | −25 % |
-| **Mean** | **0.346** | **0.170** | **−51 %** |
+| Bromothymol blue | 0.440 | 0.152 | −65 % |
+| Congo red | 0.440 | 0.101 | −77 % |
+| Rhodamine B | 0.389 | 0.067 | −83 % |
+| Methylene blue | 0.116 | 0.078 | −32 % |
+| **Mean** | **0.346** | **0.100** | **−71 %** |
 
-The curve MonoSpectro records is pixel-noisy, and the correction above is applied
-pointwise — `a(λ)·A_diy(λ) + b(λ)` at every wavelength — so any noise in the raw
-spectrum rides straight through it, and can come out amplified wherever the gain
-`a(λ)` exceeds 1. Both sides now go through a Savitzky-Golay filter (25 nm window)
-before fitting or applying the model — the input, not the fitted curve — which is
-why the corrected trace in the figure above is smooth rather than jagged. The window
-was chosen the same way as everything else here: swept from 9 to 45 nm and scored on
-the held-out set, not picked by eye — RMSE improves out to 35 nm and then turns back
-up, with 25–35 nm visually indistinguishable, so 25 nm is the smallest window that
-reaches the plateau.
+Two fixes stack to get here, both applied to the model itself — not just to this one
+plot — so every consumer of `ResponseFunction`/`ChebyshevResponse` gets them, live UI
+included:
+
+1. **Smoothing the input.** The curve MonoSpectro records is pixel-noisy, and the
+   correction is applied pointwise — `a(λ)·A_diy(λ) + b(λ)` at every wavelength — so any
+   noise in the raw spectrum rides straight through it, and can come out amplified
+   wherever the gain `a(λ)` exceeds 1. Both sides now go through a Savitzky-Golay filter
+   (25 nm window) before fitting or applying the model — the input, not the fitted curve.
+   The window was chosen the same way as everything else here: swept from 9 to 45 nm and
+   scored on the held-out set, not picked by eye — RMSE improves out to 35 nm and then
+   turns back up, with 25–35 nm visually indistinguishable, so 25 nm is the smallest
+   window that reaches the plateau. On its own this took the mean RMSE from 0.346 to
+   0.170.
+2. **Absorbance can't be negative.** `A = log10(I0/I)` of real light intensities has a
+   hard floor at zero. Away from any peak, both `a(λ)` and the training data are close to
+   zero and noisy, so the fitted line drifts to either side of it with nothing keeping it
+   physical — that is exactly the ripple sitting below zero in the earlier version of the
+   figure above. `apply()` on both models now clips its output at zero. It is not tuned
+   on the held-out set; it is the same floor a real reading always has, applied wherever
+   the model runs — inside leave-one-out, on this held-out set, live in the web UI. It
+   also was not a cosmetic fix: it took the mean RMSE from 0.170 to 0.100, because most of
+   what was left to fix was small negative excursions on points whose true absorbance is
+   approximately zero.
 
 Reproduce it with
 [`tools/calibration_transfer.py`](tools/calibration_transfer.py); the reference
@@ -127,8 +141,8 @@ of the calibration polynomial, exactly as in their formula — on this same held
 | Platform | R² | R²_adj | n | Nc | SD (AU) | CV (%) |
 | --- | --- | --- | --- | --- | --- | --- |
 | MonoSpectro, uncorrected | 0.149 | 0.149 | 1444 | 0 | n/a | n/a |
-| MonoSpectro, ResponseFunction | 0.715 | 0.715 | 1444 | 722 | n/a | n/a |
-| MonoSpectro, ChebyshevResponse | 0.800 | 0.800 | 1444 | 4 | n/a | n/a |
+| MonoSpectro, ResponseFunction | 0.822 | 0.822 | 1444 | 722 | n/a | n/a |
+| MonoSpectro, ChebyshevResponse | 0.932 | 0.932 | 1444 | 4 | n/a | n/a |
 
 `n` is every (wavelength, held-out sample) pair pooled into one R² — 361 wavelengths
 (420–780 nm) × 4 samples. `Nc` is the total number of fitted coefficients: 0 for the raw
