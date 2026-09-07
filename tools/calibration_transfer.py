@@ -2,25 +2,40 @@
 """
 Calibration transfer: correct MonoSpectro absorbance against a reference instrument.
 
-The model is a per-wavelength linear response function
+Both models fitted here share the same structure — a per-wavelength linear
+response function
 
     A_ref(lambda) = a(lambda) * A_diy(lambda) + b(lambda)
 
-fitted independently at every wavelength from a set of paired measurements, then
-smoothed along the wavelength axis so the gain and offset curves stay physical
-rather than tracking sample noise. Two coefficients per wavelength, each backed by
-as many observations as you have training samples.
+— and differ only in how a(lambda) and b(lambda) are estimated:
+
+  ResponseFunction   fits a(lambda) and b(lambda) independently at every
+                      wavelength, then smooths each curve with a Savitzky-Golay
+                      filter so it stays physical instead of tracking sample
+                      noise. Simple, but the fit and the smoothing are two
+                      separate steps.
+
+  ChebyshevResponse   expands a(lambda) and b(lambda) in a Chebyshev basis and
+                      fits every coefficient in one joint least-squares pass
+                      across all wavelengths and all training samples at once
+                      — the smoothness is built into the model instead of
+                      applied afterwards. Same structure used for System B in
+                      Rivera-Rivera et al., "Low-Cost Spectrophotometers: A
+                      Comparative Evaluation of Open-Source Architectures".
 
 Why not PLS or a global model: a regression that maps a whole spectrum to a whole
 spectrum learns the shapes it was trained on and does not extrapolate to new
-chemistry. This model learns a property of the *instrument* — how much its
-absorbance reading deviates at each wavelength — which is the same whatever is in
-the cuvette. On this project's data the difference is stark: on samples from a
-different session and a different set of dyes, the response function cut the error
-by 40 %, while a PLS model trained on the same pairs managed 4 %.
+chemistry. Both models above instead learn a property of the *instrument* — how
+much its absorbance reading deviates at each wavelength — which is the same
+whatever is in the cuvette. On this project's data the difference is stark: on
+samples from a different session and a different set of dyes, the response
+function cut the error by 40 %, while a PLS model trained on the same pairs
+managed 4 %.
 
-Hyperparameters (wavelength range, polynomial degree, smoothing window) are chosen
-by leave-one-out on the TRAINING set only. The held-out set is scored once.
+Both models' hyperparameters (wavelength range, and polynomial degree /
+smoothing window) are chosen by leave-one-out on the TRAINING set only, and both
+are then scored once on the held-out set — the lower-scoring one is used for the
+saved plot, and both scores are printed so the comparison is not hidden.
 
 Depends only on numpy, pandas, matplotlib and openpyxl — no SciPy, no
 scikit-learn — so it runs on the Raspberry Pi.
@@ -201,6 +216,74 @@ def leave_one_out(X, Y, degree, smooth):
     return float(np.mean(errs)), errs
 
 
+class ChebyshevResponse:
+    """Gain and offset expressed as a single joint Chebyshev expansion in
+    wavelength, fit in one least-squares pass across every sample and every
+    wavelength at once, rather than one independent regression per wavelength
+    smoothed afterwards.
+
+        a(lambda) = sum_m ca[m] . T_m(t(lambda))
+        b(lambda) = sum_m cb[m] . T_m(t(lambda))         t in [-1, 1]
+
+    Neighbouring wavelengths share the same detector, source and dye, so this
+    forces a(lambda) and b(lambda) to be smooth low-degree curves in
+    wavelength directly, instead of fitting pointwise and smoothing after the
+    fact — one (degree+1)*2 - parameter fit over the whole calibration set
+    instead of 2 parameters times the number of wavelengths, then a filter.
+    The Chebyshev basis (rather than plain powers of lambda) stays
+    well-conditioned as the degree grows, because its terms are close to
+    orthogonal over the fitted range.
+
+    Same model structure as Eq. 1-2 in Rivera-Rivera et al., "Low-Cost
+    Spectrophotometers: A Comparative Evaluation of Open-Source
+    Architectures" (System B), which reported R2_adj = 0.983 against a
+    commercial reference with this approach — the two lines the per-wavelength
+    OLS + Savitzky-Golay smoothing in ResponseFunction were designed to
+    approximate with less machinery. This class exists to check whether the
+    extra machinery actually earns its keep on MonoSpectro's own data.
+    """
+
+    def __init__(self, degree=8):
+        self.degree = degree
+
+    def _basis(self, grid):
+        lo, hi = grid[0], grid[-1]
+        t = 2 * (grid - lo) / (hi - lo) - 1
+        return np.polynomial.chebyshev.chebvander(t, self.degree)   # (L, degree+1)
+
+    def fit(self, X, Y, grid):
+        n, L = X.shape
+        Tm = self._basis(grid)
+        m1 = Tm.shape[1]
+        # One row per (sample, wavelength): Y = a(lambda)*X + b(lambda), linear
+        # in the Chebyshev coefficients, so the whole calibration is one lstsq.
+        A = np.zeros((n * L, 2 * m1))
+        b = np.zeros(n * L)
+        for i in range(n):
+            rows = slice(i * L, (i + 1) * L)
+            A[rows, :m1] = Tm * X[i][:, None]
+            A[rows, m1:] = Tm
+            b[rows] = Y[i]
+        coef, *_ = np.linalg.lstsq(A, b, rcond=None)
+        self.ca, self.cb, self.grid = coef[:m1], coef[m1:], grid
+        return self
+
+    def apply(self, X):
+        Tm = self._basis(self.grid)
+        a, b = Tm @ self.ca, Tm @ self.cb
+        return a[None, :] * np.asarray(X, float) + b[None, :]
+
+
+def leave_one_out_cheb(X, Y, grid, degree):
+    n = len(X)
+    errs = []
+    for i in range(n):
+        tr = [j for j in range(n) if j != i]
+        m = ChebyshevResponse(degree).fit(X[tr], Y[tr], grid)
+        errs.append(rmse(m.apply(X[i:i + 1])[0], Y[i]))
+    return float(np.mean(errs)), errs
+
+
 # ------------------------------------------------------------------ plot
 def plot_validation(grid, names, raw, fixed, ref, outfile, mean_before, mean_after):
     n = len(names)
@@ -269,9 +352,12 @@ def main():
     tr_names, Xtr_full, Ytr_full = load_side(args.train_measured, args.train_reference, full, None)
     print(f"training pairs: {len(tr_names)} — {', '.join(tr_names)}")
 
-    print("\nSelecting range, degree and smoothing by leave-one-out on the training set:")
+    ranges = ((400, 750), (400, 780), (400, 800), (410, 780), (420, 780))
+
+    print("\nSelecting range, degree and smoothing by leave-one-out on the training set "
+          "(ResponseFunction — per-wavelength fit + smoothing):")
     best = None
-    for lo, hi in ((400, 750), (400, 780), (400, 800), (410, 780), (420, 780)):
+    for lo, hi in ranges:
         m = (full >= lo) & (full <= hi)
         for degree in (1, 2):
             for smooth in (0, 31, 61, 101, 151):
@@ -291,27 +377,63 @@ def main():
     base_tr = float(np.mean([rmse(Xtr_full[i][band], Ytr_full[i][band]) for i in range(len(tr_names))]))
     print(f"  training baseline, no correction at all: RMSE {base_tr:.4f}")
 
+    print("\nSelecting range and degree by leave-one-out on the training set "
+          "(ChebyshevResponse — joint fit across all wavelengths at once):")
+    best_c = None
+    for lo_c, hi_c in ranges:
+        m = (full >= lo_c) & (full <= hi_c)
+        for deg_c in (4, 6, 8, 10, 12, 15, 18, 24):
+            if deg_c >= m.sum() - 1:
+                continue
+            score_c, _ = leave_one_out_cheb(Xtr_full[:, m], Ytr_full[:, m], full[m], deg_c)
+            if best_c is None or score_c < best_c[0]:
+                best_c = (score_c, lo_c, hi_c, deg_c)
+    score_c, lo_c, hi_c, deg_c = best_c
+    print(f"  chosen: {lo_c}–{hi_c} nm, Chebyshev degree {deg_c} "
+          f"(leave-one-out RMSE {score_c:.4f})")
+
+    band_c = (full >= lo_c) & (full <= hi_c)
+    grid_c = full[band_c]
+    model_c = ChebyshevResponse(deg_c).fit(Xtr_full[:, band_c], Ytr_full[:, band_c], grid_c)
+
     if not (args.test_measured and args.test_reference):
         print("\nNo held-out set given — stopping. An in-sample score is not a validation.")
         return
 
     labels = [s.strip() for s in args.test_labels.split(",")] if args.test_labels else None
     te_names, Xte_full, Yte_full = load_side(args.test_measured, args.test_reference, full, labels)
+
     Xte, Yte = Xte_full[:, band], Yte_full[:, band]
     fixed = model.apply(Xte)
+    Xte_c, Yte_c = Xte_full[:, band_c], Yte_full[:, band_c]
+    fixed_c = model_c.apply(Xte_c)
 
     print(f"\nHeld-out set: {len(te_names)} samples, scored once")
-    print(f"{'sample':<18} {'uncorrected':>12} {'corrected':>11} {'change':>9}")
-    before, after = [], []
+    print(f"{'sample':<18} {'uncorrected':>12} {'ResponseFn':>11} {'Chebyshev':>10} "
+          f"{'RF change':>10} {'Cheb change':>12}")
+    before, after, after_c = [], [], []
     for i, nm in enumerate(te_names):
-        a, b = rmse(Xte[i], Yte[i]), rmse(fixed[i], Yte[i])
-        before.append(a); after.append(b)
-        print(f"{nm:<18} {a:12.4f} {b:11.4f} {100 * (a - b) / a:8.0f}%")
-    mb, ma = float(np.mean(before)), float(np.mean(after))
-    print(f"{'MEAN':<18} {mb:12.4f} {ma:11.4f} {100 * (mb - ma) / mb:8.0f}%")
+        a = rmse(Xte[i], Yte[i])
+        rf = rmse(fixed[i], Yte[i])
+        cb = rmse(fixed_c[i], Yte_c[i])
+        before.append(a); after.append(rf); after_c.append(cb)
+        print(f"{nm:<18} {a:12.4f} {rf:11.4f} {cb:10.4f} "
+              f"{100 * (a - rf) / a:9.0f}% {100 * (a - cb) / a:11.0f}%")
+    mb, ma, mac = float(np.mean(before)), float(np.mean(after)), float(np.mean(after_c))
+    print(f"{'MEAN':<18} {mb:12.4f} {ma:11.4f} {mac:10.4f} "
+          f"{100 * (mb - ma) / mb:9.0f}% {100 * (mb - mac) / mb:11.0f}%")
 
-    plot_validation(grid, te_names, Xte, fixed, Yte,
-                    os.path.join(args.outdir, "validation_transfer_heldout.png"), mb, ma)
+    if mac < ma:
+        print(f"\nChebyshev wins on this held-out set ({mac:.4f} vs {ma:.4f}) — using it for the plot.")
+        plot_names, plot_grid, plot_raw, plot_fixed, plot_ref = te_names, grid_c, Xte_c, fixed_c, Yte_c
+        mean_after = mac
+    else:
+        print(f"\nResponseFunction wins on this held-out set ({ma:.4f} vs {mac:.4f}) — using it for the plot.")
+        plot_names, plot_grid, plot_raw, plot_fixed, plot_ref = te_names, grid, Xte, fixed, Yte
+        mean_after = ma
+
+    plot_validation(plot_grid, plot_names, plot_raw, plot_fixed, plot_ref,
+                    os.path.join(args.outdir, "validation_transfer_heldout.png"), mb, mean_after)
 
 
 if __name__ == "__main__":

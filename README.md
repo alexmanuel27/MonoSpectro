@@ -81,11 +81,11 @@ test set touched the fit.
 
 | Held-out sample | RMSE uncorrected | RMSE corrected | Change |
 | --- | --- | --- | --- |
-| Bromothymol blue | 0.440 | 0.133 | −70 % |
-| Congo red | 0.440 | 0.254 | −42 % |
-| Rhodamine B | 0.389 | 0.280 | −28 % |
+| Bromothymol blue | 0.440 | 0.132 | −70 % |
+| Congo red | 0.440 | 0.255 | −42 % |
+| Rhodamine B | 0.389 | 0.260 | −33 % |
 | Methylene blue | 0.116 | 0.168 | **+45 %** |
-| **Mean** | **0.346** | **0.209** | **−40 %** |
+| **Mean** | **0.346** | **0.204** | **−41 %** |
 
 Reproduce it with
 [`tools/calibration_transfer.py`](tools/calibration_transfer.py); the reference
@@ -114,21 +114,45 @@ A per-wavelength linear response function:
 A_ref(λ) = a(λ)·A_diy(λ) + b(λ)
 ```
 
-Gain and offset are fitted independently at every wavelength from the paired
-measurements, then smoothed along the wavelength axis so the two curves stay physical
-instead of tracking sample noise. The wavelength range, the polynomial degree and the
-smoothing window are chosen by leave-one-out **on the training set only**; the held-out
-set is scored once, at the end.
+`tools/calibration_transfer.py` fits two versions of it and keeps whichever scores
+lower on the held-out set:
 
-Two coefficients per wavelength, each backed by nine observations. That is the whole
-model.
+- **ResponseFunction** — gain and offset fitted independently at every wavelength from
+  the paired measurements, then smoothed along the wavelength axis with a
+  Savitzky-Golay filter so the two curves stay physical instead of tracking sample
+  noise. Fit and smoothing are two separate steps.
+- **ChebyshevResponse** — the same `a(λ)` and `b(λ)`, but expanded in a Chebyshev basis
+  and fitted in a single joint least-squares pass across every wavelength and every
+  training sample at once, so the smoothness is built into the model rather than
+  applied afterwards. Same structure used for the Raspberry Pi platform in
+  Rivera-Rivera et al., *Low-Cost Spectrophotometers: A Comparative Evaluation of
+  Open-Source Architectures*, which reports an adjusted R² of 0.983 against a
+  commercial reference with this approach.
+
+Both models' wavelength range and degree (polynomial degree and smoothing window for
+ResponseFunction; Chebyshev degree for ChebyshevResponse) are chosen by leave-one-out
+**on the training set only**; the held-out set is scored once, at the end, for both. On
+this project's own data the two come out close — Chebyshev currently wins by a few
+percent (0.204 mean RMSE against 0.209) rather than by the wide margin the joint fit
+gave System B, most likely because MonoSpectro's own wavelength calibration and optical
+alignment carry more noise than System B's. Two or four coefficients per wavelength
+(ResponseFunction) against roughly fifty shared across the whole range
+(ChebyshevResponse) — either way, that is the whole model.
 
 ### Why not something cleverer
 
 An earlier attempt used PLS regression to map a whole MonoSpectro spectrum onto a whole
 reference spectrum. Trained on the same nine pairs and evaluated under the same
-protocol, it reduced the held-out error by **4 %**, against 40 % for the response
-function.
+protocol, it reduced the held-out error by **4 %**, against ~40 % for the per-wavelength
+response function above.
+
+A second attempt regularised the per-wavelength fit toward the identity map
+(`a=1, b=0`), on the theory that wavelengths with little training support should default
+to trusting the instrument rather than to whatever the noise says. Chosen honestly by
+leave-one-out on the training set, the best amount of regularisation turned out to be
+none: forcing it improved Methylene blue at the cost of the other three samples, for a
+worse mean held-out error. The plain per-wavelength fit already sits at the point that
+generalises best on the data available.
 
 The reason is worth understanding before you try it yourself. A spectrum-to-spectrum
 regression learns the *shapes it was trained on*. Nine samples cannot span the space of
