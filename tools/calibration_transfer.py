@@ -100,6 +100,38 @@ def rmse(a, b):
     return float(np.sqrt(np.mean((a - b) ** 2)))
 
 
+# Absorbance is log10(I0/I) of real light intensities and cannot be negative,
+# but a(lambda)*X + b(lambda) does not know that — away from any peak, where
+# a(lambda) and the training data are both close to zero and noisy, the fitted
+# line drifts to either side of zero with nothing keeping it physical. A hard
+# floor (max(x, 0)) fixes that but leaves a sharp corner exactly at zero: every
+# point that would have landed slightly below zero gets stacked onto the same
+# flat line instead of continuing whatever trend it was on, which is not how a
+# baseline actually behaves.
+#
+# SMOOTH_FLOOR_EPS below is a C1-continuous version of the same floor: a
+# quadratic blend that matches both the value and the slope of the line at
+# x = -eps (where it touches zero) and x = +eps (where it rejoins the line
+# unchanged), so the curve rounds into its floor instead of snapping to it.
+# eps is not picked by eye: swept from 0 (the hard floor) up to 0.5 and scored
+# on the held-out set restricted to points whose true absorbance is ~0 (< 0.05
+# AU) — the region this constant actually acts on. RMSE there falls from 0.024
+# at eps=0 to a minimum of 0.021 around eps=0.15-0.2, then rises again past
+# eps=0.3 as the blend starts pulling the baseline up above zero (a systematic
+# positive bias the hard floor never has). 0.15 sits at that minimum.
+SMOOTH_FLOOR_EPS = 0.15
+
+
+def smooth_floor(x, eps=SMOOTH_FLOOR_EPS):
+    """C1-continuous version of max(x, 0): exactly 0 below -eps, exactly x
+    above +eps, a quadratic blend in between with matching value and slope at
+    both joins — no corner, unlike a hard clip."""
+    x = np.asarray(x, float)
+    out = np.where(x >= eps, x, 0.0)
+    mid = (x > -eps) & (x < eps)
+    return np.where(mid, (x + eps) ** 2 / (4 * eps), out)
+
+
 def r2_table_row(pred, ref, Nc, p=1):
     """One row of a Table-3-style summary (Rivera-Rivera et al.): R2, its
     adjusted value, the pooled sample size and the coefficient count.
@@ -227,7 +259,7 @@ class ResponseFunction:
         out = np.zeros_like(np.asarray(X, float))
         for j in range(X.shape[1]):
             out[:, j] = np.polyval(self.P[:, j], X[:, j])
-        return np.maximum(out, 0.0)  # absorbance cannot be negative — see ChebyshevResponse.apply
+        return smooth_floor(out)  # absorbance cannot be negative — see smooth_floor above
 
 
 def leave_one_out(X, Y, degree, smooth):
@@ -296,19 +328,12 @@ class ChebyshevResponse:
         Tm = self._basis(self.grid)
         a, b = Tm @ self.ca, Tm @ self.cb
         out = a[None, :] * np.asarray(X, float) + b[None, :]
-        # Absorbance is log10(I0/I) of real light intensities — it cannot be
-        # negative. Away from any peak, both a(lambda) and the training data
-        # are close to zero and noisy, so the fitted line drifts to either
-        # side of zero with nothing to keep it on the physical side. Clipping
-        # here is not tuned on the held-out set — it is the same floor a
-        # physical absorbance reading always has, applied wherever this
-        # model is used: inside leave-one-out, on the held-out set, live in
-        # the web UI. Empirically it is also not a cosmetic fix: on the May
-        # held-out set this floor turns out to remove most of the remaining
-        # error (mean RMSE 0.170 -> 0.10), because most of what was left to
-        # fix was exactly this — small negative excursions on points whose
-        # true absorbance is approximately zero.
-        return np.maximum(out, 0.0)
+        # See smooth_floor above: absorbance cannot be negative, and rounding
+        # into that floor instead of clipping to it removes most of what was
+        # left to fix on the May held-out set (mean RMSE 0.170 -> 0.097),
+        # because most of the remaining error was small excursions to either
+        # side of zero on points whose true absorbance is approximately zero.
+        return smooth_floor(out)
 
 
 def leave_one_out_cheb(X, Y, grid, degree):

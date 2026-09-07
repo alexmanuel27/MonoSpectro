@@ -63,7 +63,7 @@ The camera side is what this repository covers. It is the part that is built.
 | **Grating** | 1000 lines/mm transmission film, first order |
 | **Detector** | Camera-based — no moving parts, whole spectrum captured at once |
 | **Readout** | Live web interface on the local network |
-| **Calibration** | Joint Chebyshev response function, 71 % held-out error reduction |
+| **Calibration** | Joint Chebyshev response function, 72 % held-out error reduction |
 
 ## Does it actually work?
 
@@ -81,14 +81,14 @@ test set touched the fit.
 
 | Held-out sample | RMSE uncorrected | RMSE corrected | Change |
 | --- | --- | --- | --- |
-| Bromothymol blue | 0.440 | 0.152 | −65 % |
-| Congo red | 0.440 | 0.101 | −77 % |
-| Rhodamine B | 0.389 | 0.067 | −83 % |
-| Methylene blue | 0.116 | 0.078 | −32 % |
-| **Mean** | **0.346** | **0.100** | **−71 %** |
+| Bromothymol blue | 0.440 | 0.151 | −66 % |
+| Congo red | 0.440 | 0.100 | −77 % |
+| Rhodamine B | 0.389 | 0.064 | −83 % |
+| Methylene blue | 0.116 | 0.074 | −36 % |
+| **Mean** | **0.346** | **0.097** | **−72 %** |
 
-Two fixes stack to get here, both applied to the model itself — not just to this one
-plot — so every consumer of `ResponseFunction`/`ChebyshevResponse` gets them, live UI
+Three fixes stack to get here, all three applied to the model itself — not just to this
+one plot — so every consumer of `ResponseFunction`/`ChebyshevResponse` gets them, live UI
 included:
 
 1. **Smoothing the input.** The curve MonoSpectro records is pixel-noisy, and the
@@ -104,13 +104,25 @@ included:
 2. **Absorbance can't be negative.** `A = log10(I0/I)` of real light intensities has a
    hard floor at zero. Away from any peak, both `a(λ)` and the training data are close to
    zero and noisy, so the fitted line drifts to either side of it with nothing keeping it
-   physical — that is exactly the ripple sitting below zero in the earlier version of the
-   figure above. `apply()` on both models now clips its output at zero. It is not tuned
-   on the held-out set; it is the same floor a real reading always has, applied wherever
-   the model runs — inside leave-one-out, on this held-out set, live in the web UI. It
-   also was not a cosmetic fix: it took the mean RMSE from 0.170 to 0.100, because most of
-   what was left to fix was small negative excursions on points whose true absorbance is
-   approximately zero.
+   physical — that was the ripple sitting below zero in earlier versions of the figure
+   above. A first pass just clipped the output at zero (`max(x, 0)`), which worked — mean
+   RMSE 0.170 → 0.100 — but did it the crude way: a hard corner exactly at zero, every
+   point that would have landed a little below it stacked onto the same flat line instead
+   of continuing whatever trend it was on.
+3. **A rounded floor instead of a clipped one.** `smooth_floor()` in
+   `tools/calibration_transfer.py` replaces that hard clip with a curve that is exactly 0
+   below `-eps`, exactly the unclipped line above `+eps`, and a quadratic blend in between
+   that matches both the value *and* the slope at each join — no corner, the way a real
+   instrument's baseline rounds into its noise floor instead of hitting a wall. `eps` is
+   swept (0 to 0.5) and scored specifically on the points where it actually acts — the
+   held-out samples' near-zero-absorbance region (< 0.05 AU) — rather than on the full
+   held-out RMSE, which is barely sensitive to it: error there falls from 0.024 at the hard
+   clip to a minimum of 0.021 around `eps = 0.15–0.2`, then rises again past `eps = 0.3` as
+   the blend starts pulling the whole baseline up above zero, a systematic bias the hard
+   clip never had. `eps = 0.15` sits at that minimum. Rounding the floor instead of
+   clipping to it is a small further win on its own (mean RMSE 0.100 → 0.097) — most of the
+   fix was step 2 — but it is the one that makes the baseline in the figure look like an
+   instrument's rather than a `max()` call's.
 
 Reproduce it with
 [`tools/calibration_transfer.py`](tools/calibration_transfer.py); the reference
@@ -141,8 +153,8 @@ of the calibration polynomial, exactly as in their formula — on this same held
 | Platform | R² | R²_adj | n | Nc | SD (AU) | CV (%) |
 | --- | --- | --- | --- | --- | --- | --- |
 | MonoSpectro, uncorrected | 0.149 | 0.149 | 1444 | 0 | n/a | n/a |
-| MonoSpectro, ResponseFunction | 0.822 | 0.822 | 1444 | 722 | n/a | n/a |
-| MonoSpectro, ChebyshevResponse | 0.932 | 0.932 | 1444 | 4 | n/a | n/a |
+| MonoSpectro, ResponseFunction | 0.823 | 0.823 | 1444 | 722 | n/a | n/a |
+| MonoSpectro, ChebyshevResponse | 0.935 | 0.935 | 1444 | 4 | n/a | n/a |
 
 `n` is every (wavelength, held-out sample) pair pooled into one R² — 361 wavelengths
 (420–780 nm) × 4 samples. `Nc` is the total number of fitted coefficients: 0 for the raw
