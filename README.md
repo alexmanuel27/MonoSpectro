@@ -92,6 +92,14 @@ Reproduce it with
 instrument is a **K Lab Alpha**, following the standardised solution protocol developed
 by Dr. Dayaris Hernández and Dr. Aramis Rivera.
 
+> When the held-out set is a single multi-column file rather than one file per sample,
+> the script no longer trusts that column *i* in your export is column *i* in the
+> reference export — instruments save columns in whatever order the operator scanned
+> that day, and nothing forces the two files to agree. It re-pairs the two sides by
+> whichever assignment of columns maximises correlation, and prints the match and its
+> correlation for every sample so a genuinely bad reading — not a shuffled column — is
+> still visible.
+
 **Methylene blue gets worse, and that is worth saying out loud.** It was already the
 closest match before any correction — 0.116, three times better than the others — and
 the correction drags it toward the average behaviour of the training set. A response
