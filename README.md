@@ -12,8 +12,8 @@
   <img alt="status" src="https://img.shields.io/badge/status-working%20prototype-success.svg">
 </p>
 
-<!-- TODO: hero photo of the finished instrument -> docs/images/hero.jpg
-<p align="center"><img src="docs/images/hero.jpg" width="720" alt="MonoSpectro"></p>
+<!-- TODO: hero photo of the finished instrument -> docs/images/hero.png
+<p align="center"><img src="docs/images/hero.png" width="720" alt="MonoSpectro"></p>
 -->
 
 ---
@@ -170,12 +170,10 @@ flowchart LR
 
 ## Hardware
 
-<!-- PENDIENTE render del conjunto
 <p align="center">
   <img src="docs/images/cad_assembly.png" width="720"
        alt="CAD render of the assembled instrument">
 </p>
--->
 
 | Part | Spec | Notes |
 | --- | --- | --- |
@@ -196,12 +194,10 @@ flowchart LR
 
 ### Optical layout
 
-<!-- PENDIENTE render del interior
 <p align="center">
   <img src="docs/images/cad_internal_layout.png" width="420"
        alt="Internal layout: the camera and grating tilted 36 degrees inside the light-tight body">
 </p>
--->
 
 There is no collimator. The grating sits directly on the lens, and the 0.5 mm slit at
 5 mm does the work of defining the beam — a deliberately simple geometry that trades
