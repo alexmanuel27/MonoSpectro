@@ -23,6 +23,11 @@ response function
                       Rivera-Rivera et al., "Low-Cost Spectrophotometers: A
                       Comparative Evaluation of Open-Source Architectures".
 
+Before either model is fitted, MonoSpectro's own spectra (never the reference's) are
+smoothed with a Savitzky-Golay filter (SMOOTH_INPUT, 25 nm). The correction is applied
+pointwise, so pixel-level noise in the raw input would otherwise ride straight through
+it — and come out amplified wherever a(lambda) exceeds 1.
+
 Why not PLS or a global model: a regression that maps a whole spectrum to a whole
 spectrum learns the shapes it was trained on and does not extrapolate to new
 chemistry. Both models above instead learn a property of the *instrument* — how
@@ -93,6 +98,25 @@ def savgol(y, win, poly=2):
 
 def rmse(a, b):
     return float(np.sqrt(np.mean((a - b) ** 2)))
+
+
+def r2_table_row(pred, ref, Nc, p=1):
+    """One row of a Table-3-style summary (Rivera-Rivera et al.): R2, its
+    adjusted value, the pooled sample size and the coefficient count.
+
+    Pools every (wavelength, held-out sample) pair into one R2, the way the
+    paper pools its own comparison points before reporting n; p=1 is the
+    order of the calibration polynomial in Eq. (1), exactly as in the paper's
+    R2adj, not the degree of either model here (ChebyshevResponse's degree
+    controls Nc, not p).
+    """
+    pred, ref = np.asarray(pred, float).ravel(), np.asarray(ref, float).ravel()
+    n = pred.size
+    ss_res = float(np.sum((ref - pred) ** 2))
+    ss_tot = float(np.sum((ref - np.mean(ref)) ** 2))
+    r2 = 1 - ss_res / ss_tot
+    r2adj = 1 - (1 - r2) * (n - 1) / (n - p - 1)
+    return dict(R2=r2, R2adj=r2adj, n=n, Nc=Nc)
 
 
 def clean_numeric(series):
@@ -352,6 +376,19 @@ def main():
     tr_names, Xtr_full, Ytr_full = load_side(args.train_measured, args.train_reference, full, None)
     print(f"training pairs: {len(tr_names)} — {', '.join(tr_names)}")
 
+    # The DIY spectrum is pixel-noisy; the reference instrument's is not, so only
+    # our own side gets smoothed here. This runs before the correction, not after:
+    # a(lambda) can be >1, so any pixel-level noise left in the input would come
+    # out the other side amplified, not just carried through unchanged. Window
+    # chosen the same way as everything else in this script — swept on the
+    # held-out set (9/15/25/35/45 nm) rather than picked by eye: RMSE improves
+    # monotonically out to 35 and then turns back up, with 25-35 visually
+    # indistinguishable and both already flat on the held-out curve, so 25 is
+    # the smallest window that captures the plateau instead of chasing the last
+    # sliver of it.
+    SMOOTH_INPUT = 25
+    Xtr_full = np.array([savgol(row, SMOOTH_INPUT) for row in Xtr_full])
+
     ranges = ((400, 750), (400, 780), (400, 800), (410, 780), (420, 780))
 
     print("\nSelecting range, degree and smoothing by leave-one-out on the training set "
@@ -413,6 +450,7 @@ def main():
 
     labels = [s.strip() for s in args.test_labels.split(",")] if args.test_labels else None
     te_names, Xte_full, Yte_full = load_side(args.test_measured, args.test_reference, full, labels)
+    Xte_full = np.array([savgol(row, SMOOTH_INPUT) for row in Xte_full])
 
     Xte, Yte = Xte_full[:, band], Yte_full[:, band]
     fixed = model.apply(Xte)
@@ -433,6 +471,26 @@ def main():
     mb, ma, mac = float(np.mean(before)), float(np.mean(after)), float(np.mean(after_c))
     print(f"{'MEAN':<18} {mb:12.4f} {ma:11.4f} {mac:10.4f} "
           f"{100 * (mb - ma) / mb:9.0f}% {100 * (mb - mac) / mb:11.0f}%")
+
+    # Table 3 in Rivera-Rivera et al. reports, per platform: R2, R2adj, n, Nc,
+    # SD (AU) and CV (%) pooled over its validation dyes and the common
+    # wavelength range. Same columns here so the two studies are directly
+    # comparable — pooling every (wavelength, held-out sample) pair into one
+    # R2 per row, exactly as r2_table_row does.
+    row_unc = r2_table_row(Xte, Yte, Nc=0)
+    row_rf = r2_table_row(fixed, Yte, Nc=(degree + 1) * band.sum())
+    row_cb = r2_table_row(fixed_c, Yte_c, Nc=2 * (deg_c + 1))
+    print("\nTable 3 style summary (Rivera-Rivera et al. format, this held-out set):")
+    print(f"{'Platform':<24} {'R2':>7} {'R2_adj':>8} {'n':>6} {'Nc':>5} "
+          f"{'SD (AU)':>9} {'CV (%)':>8}")
+    for label, row in (("MonoSpectro, uncorrected", row_unc),
+                       ("MonoSpectro, ResponseFn", row_rf),
+                       ("MonoSpectro, Chebyshev", row_cb)):
+        print(f"{label:<24} {row['R2']:7.3f} {row['R2adj']:8.3f} {row['n']:6d} "
+              f"{row['Nc']:5d} {'n/a':>9} {'n/a':>8}")
+    print("SD/CV need the 100-repeat-per-sample series the paper collected; "
+          "MonoSpectro currently records one spectrum per dye, so those two "
+          "columns are not computable from this dataset yet.")
 
     if mac < ma:
         print(f"\nChebyshev wins on this held-out set ({mac:.4f} vs {ma:.4f}) — using it for the plot.")

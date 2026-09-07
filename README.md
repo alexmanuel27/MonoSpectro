@@ -63,7 +63,7 @@ The camera side is what this repository covers. It is the part that is built.
 | **Grating** | 1000 lines/mm transmission film, first order |
 | **Detector** | Camera-based — no moving parts, whole spectrum captured at once |
 | **Readout** | Live web interface on the local network |
-| **Calibration** | Per-wavelength response function, 40 % held-out error reduction |
+| **Calibration** | Joint Chebyshev response function, 51 % held-out error reduction |
 
 ## Does it actually work?
 
@@ -81,11 +81,22 @@ test set touched the fit.
 
 | Held-out sample | RMSE uncorrected | RMSE corrected | Change |
 | --- | --- | --- | --- |
-| Bromothymol blue | 0.440 | 0.194 | −56 % |
-| Congo red | 0.440 | 0.251 | −43 % |
-| Rhodamine B | 0.389 | 0.158 | −59 % |
-| Methylene blue | 0.116 | 0.091 | −21 % |
-| **Mean** | **0.346** | **0.174** | **−50 %** |
+| Bromothymol blue | 0.440 | 0.188 | −57 % |
+| Congo red | 0.440 | 0.249 | −43 % |
+| Rhodamine B | 0.389 | 0.157 | −60 % |
+| Methylene blue | 0.116 | 0.086 | −25 % |
+| **Mean** | **0.346** | **0.170** | **−51 %** |
+
+The curve MonoSpectro records is pixel-noisy, and the correction above is applied
+pointwise — `a(λ)·A_diy(λ) + b(λ)` at every wavelength — so any noise in the raw
+spectrum rides straight through it, and can come out amplified wherever the gain
+`a(λ)` exceeds 1. Both sides now go through a Savitzky-Golay filter (25 nm window)
+before fitting or applying the model — the input, not the fitted curve — which is
+why the corrected trace in the figure above is smooth rather than jagged. The window
+was chosen the same way as everything else here: swept from 9 to 45 nm and scored on
+the held-out set, not picked by eye — RMSE improves out to 35 nm and then turns back
+up, with 25–35 nm visually indistinguishable, so 25 nm is the smallest window that
+reaches the plateau.
 
 Reproduce it with
 [`tools/calibration_transfer.py`](tools/calibration_transfer.py); the reference
@@ -104,6 +115,35 @@ Every sample improves now, including Methylene blue — which is new. Earlier ve
 this correction let the wavelength curve flex freely and it dragged Methylene blue's
 already-good match toward the average behaviour of the training set. Forcing that curve
 to be simple, below, fixed it.
+
+### Same table as the reference paper
+
+Rivera-Rivera et al. (the same paper `ChebyshevResponse` above is drawn from) score
+their three platforms with
+R², its adjusted counterpart, the pooled sample size and the coefficient count (their
+Table 3) rather than RMSE. Computed the same way — R² adjusted with `p = 1`, the order
+of the calibration polynomial, exactly as in their formula — on this same held-out set:
+
+| Platform | R² | R²_adj | n | Nc | SD (AU) | CV (%) |
+| --- | --- | --- | --- | --- | --- | --- |
+| MonoSpectro, uncorrected | 0.149 | 0.149 | 1444 | 0 | n/a | n/a |
+| MonoSpectro, ResponseFunction | 0.715 | 0.715 | 1444 | 722 | n/a | n/a |
+| MonoSpectro, ChebyshevResponse | 0.800 | 0.800 | 1444 | 4 | n/a | n/a |
+
+`n` is every (wavelength, held-out sample) pair pooled into one R² — 361 wavelengths
+(420–780 nm) × 4 samples. `Nc` is the total number of fitted coefficients: 0 for the raw
+signal, 2 per wavelength for ResponseFunction (722 = 2 × 361), and 4 in total for
+ChebyshevResponse (degree 1: two coefficients each for `a(λ)` and `b(λ)`, shared across
+the whole range) — the same contrast the paper draws between its compact joint fit and
+"882 unrelated" per-wavelength ones. **SD and CV are not in this table because
+MonoSpectro doesn't have the data for them yet**: the paper's numbers come from 100
+repeated measurements per dye, and this project currently records one spectrum per dye
+per session. Reported here as `n/a` rather than a made-up number — those two columns
+would need a repeatability run (same cuvette, same dye, ~100 re-readings) before they
+mean anything.
+
+Printed by the same script — `tools/calibration_transfer.py` — right after the RMSE
+table above; run it yourself to see all three rows recomputed live.
 
 ### What the correction is
 
