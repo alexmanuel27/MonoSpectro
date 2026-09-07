@@ -110,3 +110,6 @@ logs/
 
 # Nota local, no se publica
 docs/PENDIENTE.md
+
+# Copia de trabajo del codigo que corre en la Raspi (no se publica)
+_pi_actual/

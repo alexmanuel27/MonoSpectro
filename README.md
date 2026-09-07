@@ -164,9 +164,9 @@ flowchart LR
    averaged vertically, giving one intensity value per pixel column.
 3. **Wavelength axis** — a 1st or 2nd degree polynomial maps pixel position to
    nanometres. Coefficients live in `calibration.json`.
-4. **Absorbance** — capture a blank (`Blanco`) to store *I₀*, then every subsequent
+4. **Absorbance** — capture a blank (`Blank`) to store *I₀*, then every subsequent
    frame is reported as `A = log10(I₀ / I)`.
-5. **Export** — `Guardar Abs` downloads a CSV with `Pixel, Wavelength_nm, abs`.
+5. **Export** — `Save Abs` downloads a CSV with `Pixel, Wavelength_nm, abs`.
 
 ## Hardware
 
@@ -303,12 +303,8 @@ an isolated virtualenv cannot see the camera at all.
 Then open `http://<your-pi-address>:5000` from any machine on the same network. The Pi
 can also serve as its own access point, so the instrument needs no infrastructure in the
 field — see [docs/software.md](docs/software.md) for that and for the systemd unit that
-starts it on boot.
-
-> One thing to fix before taking it anywhere without internet: `templates/index.html`
-> loads Chart.js from a CDN, so in access-point mode the chart never renders. Save
-> `chart.umd.js` into `static/chart.min.js` while the Pi is still online and point the
-> tag at the local copy.
+starts it on boot. Chart.js is vendored in `static/`, so the interface works with no
+route to the internet.
 
 For the desktop-side analysis tools:
 
@@ -322,22 +318,23 @@ pip install -r tools/requirements.txt
 > field setup: **[docs/software.md](docs/software.md)**.
 
 1. **Frame the spectrum.** Adjust exposure and gain in the sidebar until the spectral
-   line is bright but not clipped, then set the ROI (`x;y` for the top-left and
-   bottom-right corners) so the green box hugs the line.
+   line is bright but not clipped, then set the ROI (`x;y` for two opposite corners) so
+   the green box hugs the line. The ROI is remembered across restarts.
 2. **Calibrate the wavelength axis** (one of the two methods below).
-3. **Take a blank.** Fill the cuvette with your solvent, press `Blanco`.
-4. **Measure.** Swap in the sample, press `Guardar Abs` to download the spectrum.
+3. **Take a blank.** Fill the cuvette with your solvent, press `Blank`.
+4. **Measure.** Swap in the sample, press `Save Abs` to download the spectrum.
 
 ### Calibration method 1 — known peaks
 
-Enable `Calibrar Picos`, click on a peak in the live chart, and type its known
+Enable `Calibrate on chart`, click on a peak in the live chart, and type its known
 wavelength. Two points give a linear fit; four or more switch to a quadratic. Good
 sources of known lines: a compact fluorescent lamp (mercury lines at 436, 546 and
-611 nm) or any laser pointer with a specified wavelength.
+611 nm) or any laser pointer with a specified wavelength. A fit that maps the middle of
+the sensor outside 200–1100 nm is rejected rather than saved.
 
 ### Calibration method 2 — sample sync against a reference instrument
 
-Press `Sincronizar` and upload pairs of files: your own exported CSV alongside the
+Press `Sync` and upload pairs of files: your own exported CSV alongside the
 same sample measured on a reference spectrophotometer. MonoSpectro finds the
 absorbance maximum in each (smoothed with a 25-point rolling mean), pairs
 *your pixel* with *their nanometre*, and fits the axis to it. Six or more pairs
@@ -367,7 +364,10 @@ This file is **device-specific** and gitignored — yours will differ from the e
 ```
 ├── app.py                     # Flask server: camera stream, spectrum, calibration
 ├── templates/index.html       # Web interface
-├── static/                    # Front-end logic and styling
+├── static/
+│   ├── script.js              # Front-end logic
+│   ├── style.css              # Interface styling
+│   └── chart.min.js           # Chart.js, vendored so it works with no internet
 ├── tools/
 │   ├── calibration_transfer.py  # Fit and validate the response correction
 │   └── compare_reference.py     # Raw shape comparison against a reference
@@ -391,6 +391,7 @@ processed figures are.
 - [ ] IR-cut filter (BG38 / UG11) to stop NIR leakage through the NoIR sensor
 - [ ] Dark-frame subtraction to compensate sensor noise at long exposures
 - [ ] Save/load named calibration profiles instead of a single global file
+- [ ] Dark-current reference stored alongside the blank, so absorbance survives a restart
 - [ ] Store measurement sessions server-side instead of one-shot CSV downloads
 - [ ] Transmittance and concentration (Beer–Lambert) readouts
 - [ ] English translation of the web interface
