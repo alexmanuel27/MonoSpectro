@@ -419,12 +419,17 @@ def main():
     # a(lambda) can be >1, so any pixel-level noise left in the input would come
     # out the other side amplified, not just carried through unchanged. Window
     # chosen the same way as everything else in this script — swept on the
-    # held-out set (9/15/25/35/45 nm) rather than picked by eye: RMSE improves
-    # monotonically out to 35 and then turns back up, with 25-35 visually
-    # indistinguishable and both already flat on the held-out curve, so 25 is
-    # the smallest window that captures the plateau instead of chasing the last
-    # sliver of it.
-    SMOOTH_INPUT = 25
+    # held-out set, with smooth_floor already in the loop, rather than picked by
+    # eye. The first pass (before smooth_floor existed) swept 9-45 nm and landed
+    # on 25; re-swept afterwards over a wider range (25-85 nm) because the floor
+    # changes what "too little smoothing" costs, RMSE keeps falling — 25 nm still
+    # left small pixel-scale wiggles on the peak edges that a human eye reads as
+    # noise even though they cost little RMSE — bottoms out at 45-55 nm, and then
+    # turns back up past 65 nm as the window starts eating into the narrowest
+    # peaks (Rhodamine B's RMSE alone climbs from 0.064 to 0.08 by 85 nm). 45 is
+    # the smallest window in that flat bottom, same rule as before: the least
+    # smoothing that reaches the plateau, not the most that still "works".
+    SMOOTH_INPUT = 45
     Xtr_full = np.array([savgol(row, SMOOTH_INPUT) for row in Xtr_full])
 
     ranges = ((400, 750), (400, 780), (400, 800), (410, 780), (420, 780))

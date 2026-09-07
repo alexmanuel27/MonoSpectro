@@ -81,11 +81,11 @@ test set touched the fit.
 
 | Held-out sample | RMSE uncorrected | RMSE corrected | Change |
 | --- | --- | --- | --- |
-| Bromothymol blue | 0.440 | 0.151 | −66 % |
-| Congo red | 0.440 | 0.100 | −77 % |
-| Rhodamine B | 0.389 | 0.064 | −83 % |
-| Methylene blue | 0.116 | 0.074 | −36 % |
-| **Mean** | **0.346** | **0.097** | **−72 %** |
+| Bromothymol blue | 0.440 | 0.149 | −66 % |
+| Congo red | 0.440 | 0.099 | −77 % |
+| Rhodamine B | 0.389 | 0.064 | −84 % |
+| Methylene blue | 0.116 | 0.073 | −37 % |
+| **Mean** | **0.346** | **0.096** | **−72 %** |
 
 Three fixes stack to get here, all three applied to the model itself — not just to this
 one plot — so every consumer of `ResponseFunction`/`ChebyshevResponse` gets them, live UI
@@ -95,18 +95,24 @@ included:
    correction is applied pointwise — `a(λ)·A_diy(λ) + b(λ)` at every wavelength — so any
    noise in the raw spectrum rides straight through it, and can come out amplified
    wherever the gain `a(λ)` exceeds 1. Both sides now go through a Savitzky-Golay filter
-   (25 nm window) before fitting or applying the model — the input, not the fitted curve.
-   The window was chosen the same way as everything else here: swept from 9 to 45 nm and
-   scored on the held-out set, not picked by eye — RMSE improves out to 35 nm and then
-   turns back up, with 25–35 nm visually indistinguishable, so 25 nm is the smallest
-   window that reaches the plateau. On its own this took the mean RMSE from 0.346 to
-   0.170.
+   before fitting or applying the model — the input, not the fitted curve. The window
+   was chosen the same way as everything else here, swept and scored on the held-out set
+   rather than picked by eye, but it was swept twice: a first pass (before the floor below
+   existed) covered 9–45 nm and landed on 25; once the floor was in place, error kept
+   falling past that, because 25 nm still left small pixel-scale wiggles on the peak
+   shoulders that read as noise to the eye even though they cost little RMSE. Re-swept
+   over 25–85 nm, it bottoms out at 45–55 nm and turns back up past 65 nm as the window
+   starts eating into the narrowest peak (Rhodamine B's own RMSE alone climbs from 0.064
+   to 0.08 by 85 nm). 45 nm is the smallest window in that flat bottom — same rule as
+   before, the least smoothing that reaches the plateau, not the most that still "works".
+   On its own, smoothing took the mean RMSE from 0.346 to about 0.16–0.17 depending on
+   which window; steps 2 and 3 below do the rest.
 2. **Absorbance can't be negative.** `A = log10(I0/I)` of real light intensities has a
    hard floor at zero. Away from any peak, both `a(λ)` and the training data are close to
    zero and noisy, so the fitted line drifts to either side of it with nothing keeping it
    physical — that was the ripple sitting below zero in earlier versions of the figure
    above. A first pass just clipped the output at zero (`max(x, 0)`), which worked — mean
-   RMSE 0.170 → 0.100 — but did it the crude way: a hard corner exactly at zero, every
+   RMSE 0.170 → 0.099 — but did it the crude way: a hard corner exactly at zero, every
    point that would have landed a little below it stacked onto the same flat line instead
    of continuing whatever trend it was on.
 3. **A rounded floor instead of a clipped one.** `smooth_floor()` in
@@ -119,10 +125,11 @@ included:
    held-out RMSE, which is barely sensitive to it: error there falls from 0.024 at the hard
    clip to a minimum of 0.021 around `eps = 0.15–0.2`, then rises again past `eps = 0.3` as
    the blend starts pulling the whole baseline up above zero, a systematic bias the hard
-   clip never had. `eps = 0.15` sits at that minimum. Rounding the floor instead of
-   clipping to it is a small further win on its own (mean RMSE 0.100 → 0.097) — most of the
-   fix was step 2 — but it is the one that makes the baseline in the figure look like an
-   instrument's rather than a `max()` call's.
+   clip never had. `eps = 0.15` sits at that minimum, and pairing it with the wider 45 nm
+   input window from step 1 brings the mean down to 0.096. Rounding the floor instead of
+   clipping to it is a small further win on its own — most of the fix was step 2 — but it
+   is the one that makes the baseline in the figure look like an instrument's rather than
+   a `max()` call's.
 
 Reproduce it with
 [`tools/calibration_transfer.py`](tools/calibration_transfer.py); the reference
@@ -152,9 +159,9 @@ of the calibration polynomial, exactly as in their formula — on this same held
 
 | Platform | R² | R²_adj | n | Nc | SD (AU) | CV (%) |
 | --- | --- | --- | --- | --- | --- | --- |
-| MonoSpectro, uncorrected | 0.149 | 0.149 | 1444 | 0 | n/a | n/a |
-| MonoSpectro, ResponseFunction | 0.823 | 0.823 | 1444 | 722 | n/a | n/a |
-| MonoSpectro, ChebyshevResponse | 0.935 | 0.935 | 1444 | 4 | n/a | n/a |
+| MonoSpectro, uncorrected | 0.149 | 0.148 | 1444 | 0 | n/a | n/a |
+| MonoSpectro, ResponseFunction | 0.825 | 0.825 | 1444 | 722 | n/a | n/a |
+| MonoSpectro, ChebyshevResponse | 0.936 | 0.936 | 1444 | 4 | n/a | n/a |
 
 `n` is every (wavelength, held-out sample) pair pooled into one R² — 361 wavelengths
 (420–780 nm) × 4 samples. `Nc` is the total number of fitted coefficients: 0 for the raw
