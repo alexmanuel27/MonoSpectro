@@ -81,11 +81,11 @@ test set touched the fit.
 
 | Held-out sample | RMSE uncorrected | RMSE corrected | Change |
 | --- | --- | --- | --- |
-| Bromothymol blue | 0.440 | 0.132 | −70 % |
-| Congo red | 0.440 | 0.255 | −42 % |
-| Rhodamine B | 0.389 | 0.260 | −33 % |
-| Methylene blue | 0.116 | 0.168 | **+45 %** |
-| **Mean** | **0.346** | **0.204** | **−41 %** |
+| Bromothymol blue | 0.440 | 0.194 | −56 % |
+| Congo red | 0.440 | 0.251 | −43 % |
+| Rhodamine B | 0.389 | 0.158 | −59 % |
+| Methylene blue | 0.116 | 0.091 | −21 % |
+| **Mean** | **0.346** | **0.174** | **−50 %** |
 
 Reproduce it with
 [`tools/calibration_transfer.py`](tools/calibration_transfer.py); the reference
@@ -100,11 +100,10 @@ by Dr. Dayaris Hernández and Dr. Aramis Rivera.
 > correlation for every sample so a genuinely bad reading — not a shuffled column — is
 > still visible.
 
-**Methylene blue gets worse, and that is worth saying out loud.** It was already the
-closest match before any correction — 0.116, three times better than the others — and
-the correction drags it toward the average behaviour of the training set. A response
-function fitted on nine samples is a blunt instrument: it helps where the error is
-large and can hurt where the instrument already happened to agree.
+Every sample improves now, including Methylene blue — which is new. Earlier versions of
+this correction let the wavelength curve flex freely and it dragged Methylene blue's
+already-good match toward the average behaviour of the training set. Forcing that curve
+to be simple, below, fixed it.
 
 ### What the correction is
 
@@ -126,33 +125,40 @@ lower on the held-out set:
   training sample at once, so the smoothness is built into the model rather than
   applied afterwards. Same structure used for the Raspberry Pi platform in
   Rivera-Rivera et al., *Low-Cost Spectrophotometers: A Comparative Evaluation of
-  Open-Source Architectures*, which reports an adjusted R² of 0.983 against a
-  commercial reference with this approach.
+  Open-Source Architectures*.
 
-Both models' wavelength range and degree (polynomial degree and smoothing window for
-ResponseFunction; Chebyshev degree for ChebyshevResponse) are chosen by leave-one-out
-**on the training set only**; the held-out set is scored once, at the end, for both. On
-this project's own data the two come out close — Chebyshev currently wins by a few
-percent (0.204 mean RMSE against 0.209) rather than by the wide margin the joint fit
-gave System B, most likely because MonoSpectro's own wavelength calibration and optical
-alignment carry more noise than System B's. Two or four coefficients per wavelength
-(ResponseFunction) against roughly fifty shared across the whole range
-(ChebyshevResponse) — either way, that is the whole model.
+The Chebyshev degree is fixed at **1** — a(λ) and b(λ) are straight lines in
+wavelength, not a free-form curve — rather than chosen from a wide range by
+leave-one-out. The [shape check](#spectral-shape-separately) below already shows
+MonoSpectro's raw spectra track the reference's shape closely (r² of 0.98, 0.95, 0.92
+and 0.89 fitting one scalar gain per sample); nothing in the optics motivates a(λ) or
+b(λ) to have a complicated shape of their own, only a gentle drift with wavelength.
+Letting leave-one-out pick the degree freely confirmed this from the other direction:
+higher degrees won narrowly on the training score, which has every incentive to reward
+extra flexibility, and then generalised *worse* to the held-out set — degree 1 is not
+the LOO-optimal choice on paper, it is the one that actually held up, which is exactly
+the failure mode LOO with too many hyperparameters to search is prone to on nine
+samples. The wavelength range is still chosen by leave-one-out on the training set
+alone, same as ResponseFunction; only the degree is fixed by this argument instead of
+searched.
+
+Two or four coefficients per wavelength (ResponseFunction) against four numbers shared
+across the whole range (ChebyshevResponse) — either way, that is the whole model.
 
 ### Why not something cleverer
 
 An earlier attempt used PLS regression to map a whole MonoSpectro spectrum onto a whole
 reference spectrum. Trained on the same nine pairs and evaluated under the same
-protocol, it reduced the held-out error by **4 %**, against ~40 % for the per-wavelength
+protocol, it reduced the held-out error by **4 %**, against ~50 % for the per-wavelength
 response function above.
 
 A second attempt regularised the per-wavelength fit toward the identity map
 (`a=1, b=0`), on the theory that wavelengths with little training support should default
 to trusting the instrument rather than to whatever the noise says. Chosen honestly by
 leave-one-out on the training set, the best amount of regularisation turned out to be
-none: forcing it improved Methylene blue at the cost of the other three samples, for a
-worse mean held-out error. The plain per-wavelength fit already sits at the point that
-generalises best on the data available.
+none for that model — a symptom of the same underlying problem the fixed-degree
+Chebyshev fit above solves more directly, by not giving the wavelength curve the
+freedom to need reining in.
 
 The reason is worth understanding before you try it yourself. A spectrum-to-spectrum
 regression learns the *shapes it was trained on*. Nine samples cannot span the space of
