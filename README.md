@@ -58,7 +58,7 @@ The camera side is what this repository covers. It is the part that is built.
 
 | | |
 | --- | --- |
-| **Validated range** | 420–780 nm, held-out validation against a K Lab Alpha |
+| **Validated range** | 420–780 nm, held-out validation against a K LAB Optizen Alpha |
 | **Sensor** | 1280×720 monochrome, global shutter, 8-bit |
 | **Grating** | 1000 lines/mm transmission film, first order |
 | **Detector** | Camera-based — no moving parts, whole spectrum captured at once |
@@ -133,7 +133,7 @@ included:
 
 Reproduce it with
 [`tools/calibration_transfer.py`](tools/calibration_transfer.py); the reference
-instrument is a **K Lab Alpha**, following the standardised solution protocol developed
+instrument is a **K LAB Optizen Alpha** (double-beam UV-Vis), following the standardised solution protocol developed
 by Dr. Dayaris Hernández and Dr. Aramis Rivera.
 
 > When the held-out set is a single multi-column file rather than one file per sample,
@@ -293,7 +293,7 @@ flowchart LR
 | Grating | [Edmund Optics #4621](https://www.edmundoptics.eu/p/25400-linesinch-6quot-x-12quot-sheets-2pack/4621/) — 25,400 lines/inch ≈ **1000 lines/mm** | Transmission film, cut from a 6"×12" sheet and **bonded directly to the lens** |
 | Camera tilt | 36° from the slit axis | Places the middle of the visible band on the optical axis |
 | Entrance slit | 0.5 mm wide | Sets the spectral resolution together with the dispersion |
-| Slit → camera | 5 mm | No collimating optics between them |
+| Slit → lens | 60 mm | No collimating optics between them |
 | Light source | 10 W halogen lamp | Continuous spectrum across the visible band |
 | Cuvette | Standard 10 mm path length | Ordinary lab cuvettes — nothing custom |
 | Computer | Raspberry Pi 4 | Runs the Flask app and the camera stack |
@@ -311,7 +311,7 @@ flowchart LR
 </p>
 
 There is no collimator. The grating sits directly on the lens, and the 0.5 mm slit at
-5 mm does the work of defining the beam — a deliberately simple geometry that trades
+60 mm does the work of defining the beam — a deliberately simple geometry that trades
 some throughput for a build anyone can reproduce without an optical bench.
 
 For a 1000 lines/mm grating at normal incidence, the first order lands at:

@@ -65,6 +65,7 @@ import os
 from math import factorial
 
 import numpy as np
+from matplotlib.lines import Line2D
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
@@ -346,6 +347,49 @@ def leave_one_out_cheb(X, Y, grid, degree):
     return float(np.mean(errs)), errs
 
 
+def plot_response(grid_c, a_c, b_c, grid_rf, a_rf, b_rf, outfile):
+    """The fitted response function: what the correction actually is.
+
+    Both curves describe the same relation, A_ref = a(lambda)*A_dev + b(lambda).
+    The per-wavelength fit estimates them independently at every wavelength and
+    smooths afterwards; the joint Chebyshev fit is two straight lines. Plotting
+    them together is the clearest statement of the paper's point - the
+    constrained model keeps the drift and drops the wiggle.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    SURFACE, INK, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e2e1dd"
+    C_JOINT, C_PER = "#2a78d6", "#eb6834"
+
+    fig, axes = plt.subplots(2, 1, figsize=(3.5, 3.4), sharex=True)
+    fig.patch.set_facecolor(SURFACE)
+    panels = ((axes[0], a_rf, a_c, r"gain $a(\lambda)$"),
+              (axes[1], b_rf, b_c, r"offset $b(\lambda)$"))
+    for ax, per, joint, ylab in panels:
+        ax.set_facecolor(SURFACE)
+        ax.grid(True, color=GRID, lw=0.5)
+        ax.set_axisbelow(True)
+        ax.plot(grid_rf, per, color=C_PER, lw=1.1, ls=(0, (3.5, 2)), zorder=2)
+        ax.plot(grid_c, joint, color=C_JOINT, lw=1.8, zorder=3)
+        ax.set_ylabel(ylab, fontsize=8.5, color=MUTED)
+        ax.tick_params(labelsize=7.5, colors=MUTED, length=3)
+        for sd in ("top", "right"):
+            ax.spines[sd].set_visible(False)
+        for sd in ("left", "bottom"):
+            ax.spines[sd].set_color(GRID)
+    axes[1].set_xlabel("Wavelength (nm)", fontsize=8.5, color=MUTED)
+    axes[0].legend(handles=[
+        Line2D([], [], color=C_JOINT, lw=1.8, label="joint Chebyshev (4 coefficients)"),
+        Line2D([], [], color=C_PER, lw=1.1, ls=(0, (3.5, 2)),
+               label="per wavelength (722)")],
+        loc="best", frameon=False, fontsize=7.2, labelcolor=INK)
+    fig.tight_layout(pad=0.4)
+    fig.savefig(outfile, dpi=300, facecolor=SURFACE)
+    print("wrote", outfile)
+
+
 # ------------------------------------------------------------------ plot
 def plot_validation(grid, names, raw, fixed, ref, outfile, mean_before, mean_after):
     n = len(names)
@@ -543,6 +587,11 @@ def main():
         print(f"\nResponseFunction wins on this held-out set ({ma:.4f} vs {mac:.4f}) — using it for the plot.")
         plot_names, plot_grid, plot_raw, plot_fixed, plot_ref = te_names, grid, Xte, fixed, Yte
         mean_after = ma
+
+    Tm = model_c._basis(grid_c)
+    plot_response(grid_c, Tm @ model_c.ca, Tm @ model_c.cb,
+                  grid, model.P[0], model.P[1],
+                  os.path.join(args.outdir, "response_function.png"))
 
     plot_validation(plot_grid, plot_names, plot_raw, plot_fixed, plot_ref,
                     os.path.join(args.outdir, "validation_transfer_heldout.png"), mb, mean_after)
