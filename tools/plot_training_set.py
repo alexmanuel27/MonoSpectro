@@ -180,6 +180,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("data_dir", nargs="?", default="DATOS DE ARAMIS 19-5/14_04_26")
     ap.add_argument("-o", "--out", default="docs/images/training_set.png")
+    ap.add_argument("--column", action="store_true",
+                    help="single-column figure for the letter (3.4 in wide)")
     args = ap.parse_args()
 
     pairs = {n: load_pair(args.data_dir, n) for n in ORDER}
@@ -190,7 +192,16 @@ def main():
     swatches = dict(zip(ORDER, separate(vivid, min_de=18.0, target=1.6)))
     inks = dict(zip(ORDER, separate([ink_from(swatches[n]) for n in ORDER])))
 
-    fig, axes = plt.subplots(3, 3, figsize=(6.8, 4.9), sharex=True, sharey=True)
+    # single-column figures in a two-column journal are drawn at final size, so
+    # the type has to be set in points that survive at 3.4 in rather than scaled
+    if args.column:
+        FS = dict(fig=(3.42, 3.05), lab=5.2, tick=4.4, sup=5.8, leg=5.2,
+                  lw_ref=1.0, lw_dev=0.8, sw=(0.115, 0.15))
+    else:
+        FS = dict(fig=(6.8, 4.9), lab=8.5, tick=7.5, sup=9.0, leg=8.5,
+                  lw_ref=1.7, lw_dev=1.3, sw=(0.085, 0.115))
+
+    fig, axes = plt.subplots(3, 3, figsize=FS["fig"], sharex=True, sharey=True)
     fig.patch.set_facecolor(SURFACE)
 
     for ax, name in zip(axes.ravel(), ORDER):
@@ -202,34 +213,36 @@ def main():
         # y-axis carries enough headroom that no curve reaches into it
         sx, tx, ha = 0.05, 0.185, "left"
         swatch, ink = swatches[name], inks[name]
-        ax.plot(rw, ra, color=ink, lw=1.7, solid_capstyle="round", zorder=3)
-        ax.plot(dw, da, color=ink, lw=1.3, ls=(0, (3.5, 2)), alpha=0.85, zorder=2)
-        ax.add_patch(Rectangle((sx, 0.845), 0.085, 0.115,
+        ax.plot(rw, ra, color=ink, lw=FS["lw_ref"], solid_capstyle="round", zorder=3)
+        ax.plot(dw, da, color=ink, lw=FS["lw_dev"], ls=(0, (3, 1.8)), alpha=0.9, zorder=2)
+        ax.add_patch(Rectangle((sx, 0.845), FS["sw"][0], FS["sw"][1],
                                transform=ax.transAxes,
                                facecolor=swatch, edgecolor=INK_MUTED,
                                linewidth=0.6, zorder=5))
-        ax.text(tx, 0.902, name, transform=ax.transAxes, fontsize=8.5,
+        ax.text(tx, 0.902, name, transform=ax.transAxes, fontsize=FS["lab"],
                 color=INK, va="center", ha=ha, zorder=5)
 
         ax.set_xlim(LO, HI)
         ax.set_ylim(0, ytop * 1.15)
-        ax.tick_params(labelsize=7.5, colors=INK_MUTED, length=3)
+        ax.tick_params(labelsize=FS["tick"], colors=INK_MUTED, length=2.5)
+        ax.locator_params(axis="x", nbins=3)
+        ax.locator_params(axis="y", nbins=4)
         for side in ("top", "right"):
             ax.spines[side].set_visible(False)
         for side in ("left", "bottom"):
             ax.spines[side].set_color(GRID)
 
-    fig.supxlabel("Wavelength (nm)", fontsize=9, color=INK_MUTED)
-    fig.supylabel("Absorbance (AU)", fontsize=9, color=INK_MUTED)
+    fig.supxlabel("Wavelength (nm)", fontsize=FS["sup"], color=INK_MUTED)
+    fig.supylabel("Absorbance (AU)", fontsize=FS["sup"], color=INK_MUTED)
 
-    fig.legend(handles=[Line2D([], [], color=INK, lw=1.7,
+    fig.legend(handles=[Line2D([], [], color=INK, lw=FS["lw_ref"],
                                label="Reference instrument"),
-                        Line2D([], [], color=INK, lw=1.3, ls=(0, (3.5, 2)),
+                        Line2D([], [], color=INK, lw=FS["lw_dev"], ls=(0, (3, 1.8)),
                                label="MonoSpectro, uncorrected")],
-               loc="upper center", ncol=2, frameon=False, fontsize=8.5,
+               loc="upper center", ncol=2, frameon=False, fontsize=FS["leg"],
                labelcolor=INK, bbox_to_anchor=(0.5, 1.005))
 
-    fig.tight_layout(rect=(0.012, 0.012, 1, 0.945))
+    fig.tight_layout(rect=(0.012, 0.012, 1, 0.935 if args.column else 0.945))
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     fig.savefig(args.out, dpi=300, facecolor=SURFACE)
     print("wrote", args.out)

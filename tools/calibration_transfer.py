@@ -391,44 +391,63 @@ def plot_response(grid_c, a_c, b_c, grid_rf, a_rf, b_rf, outfile):
 
 
 # ------------------------------------------------------------------ plot
-def plot_validation(grid, names, raw, fixed, ref, outfile, mean_before, mean_after):
+def plot_validation(grid, names, raw, fixed, ref, outfile, mean_before, mean_after,
+                    column=False):
     n = len(names)
     ncols = 2 if n > 1 else 1
     nrows = int(np.ceil(n / ncols))
-    fig, axes = plt.subplots(nrows, ncols, figsize=(5.4 * ncols, 3.6 * nrows),
+    # a single-column figure is drawn at final size: the type must be set in
+    # points that stay legible at 3.4 in, not scaled down afterwards
+    if column:
+        F = dict(fig=(3.42, 2.72), title=5.6, tick=4.4, lab=5.2, note=4.6,
+                 leg=5.0, lw=(0.95, 0.85, 1.0), dash=(0, (3, 1.9)))
+    else:
+        F = dict(fig=(5.4 * ncols, 3.6 * nrows), title=10.5, tick=9, lab=10,
+                 note=9, leg=9.5, lw=(1.9, 1.6, 2.0), dash=(0, (4, 2.6)))
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=F["fig"],
                              squeeze=False, facecolor=SURFACE)
     flat = axes.flatten()
     for ax, nm, r, f, y in zip(flat, names, raw, fixed, ref):
         ax.set_facecolor(SURFACE)
-        for s in ("top", "right"):
-            ax.spines[s].set_visible(False)
-        for s in ("left", "bottom"):
-            ax.spines[s].set_color(GRID)
-        ax.grid(True, axis="y", color=GRID, linewidth=1)
+        for s_ in ("top", "right"):
+            ax.spines[s_].set_visible(False)
+        for s_ in ("left", "bottom"):
+            ax.spines[s_].set_color(GRID)
+        ax.grid(True, axis="y", color=GRID, linewidth=0.7 if column else 1)
         ax.set_axisbelow(True)
-        ax.tick_params(colors=INK_SOFT, labelsize=9, length=0)
-        ax.plot(grid, y, color=C_REF, linewidth=1.9, linestyle=(0, (4, 2.6)),
+        ax.tick_params(colors=INK_SOFT, labelsize=F["tick"], length=0)
+        if column:
+            ax.locator_params(axis="x", nbins=4)
+            ax.locator_params(axis="y", nbins=4)
+        ax.plot(grid, y, color=C_REF, linewidth=F["lw"][0], linestyle=F["dash"],
                 label="Reference instrument (dashed)")
-        ax.plot(grid, r, color=C_RAW, linewidth=1.6, alpha=0.85, label="MonoSpectro, uncorrected")
-        ax.plot(grid, f, color=C_FIX, linewidth=2, label="MonoSpectro, corrected")
-        ax.set_title(nm, fontsize=10.5, color=INK, loc="left", pad=6)
-        ax.text(0.98, 0.94, f"RMSE {rmse(r, y):.2f} → {rmse(f, y):.2f}", transform=ax.transAxes,
-                ha="right", va="top", fontsize=9, color=INK_SOFT)
+        ax.plot(grid, r, color=C_RAW, linewidth=F["lw"][1], alpha=0.85,
+                label="MonoSpectro, uncorrected")
+        ax.plot(grid, f, color=C_FIX, linewidth=F["lw"][2],
+                label="MonoSpectro, corrected")
+        ax.set_title(nm, fontsize=F["title"], color=INK, loc="left",
+                     pad=3 if column else 6)
+        ax.text(0.98, 0.94, f"RMSE {rmse(r, y):.2f} \u2192 {rmse(f, y):.2f}",
+                transform=ax.transAxes, ha="right", va="top",
+                fontsize=F["note"], color=INK_SOFT)
         ax.set_xlim(grid[0], grid[-1])
     for ax in flat[n:]:
         ax.set_visible(False)
     for row in range(nrows):
-        axes[row][0].set_ylabel("Absorbance", fontsize=10, color=INK_SOFT)
+        axes[row][0].set_ylabel("Absorbance", fontsize=F["lab"], color=INK_SOFT)
     for col in range(ncols):
-        axes[nrows - 1][col].set_xlabel("Wavelength (nm)", fontsize=10, color=INK_SOFT)
+        axes[nrows - 1][col].set_xlabel("Wavelength (nm)", fontsize=F["lab"],
+                                        color=INK_SOFT)
 
     h, l = flat[0].get_legend_handles_labels()
     fig.legend(h, l, loc="upper center", bbox_to_anchor=(0.5, 1.0), frameon=False,
-               fontsize=9.5, labelcolor=INK_SOFT, ncols=3, handlelength=3.4,
-               columnspacing=1.8)
-    fig.tight_layout(rect=(0.015, 0.01, 0.985, 0.945))
-    fig.subplots_adjust(hspace=0.32)
-    fig.savefig(outfile, dpi=200, facecolor=SURFACE)
+               fontsize=F["leg"], labelcolor=INK_SOFT, ncols=3,
+               handlelength=2.6 if column else 3.4,
+               columnspacing=0.9 if column else 1.8)
+    fig.tight_layout(rect=(0.015, 0.01, 0.985, 0.93 if column else 0.945))
+    fig.subplots_adjust(hspace=0.42 if column else 0.32)
+    fig.savefig(outfile, dpi=300 if column else 200, facecolor=SURFACE)
     plt.close(fig)
     print(f"saved: {outfile}")
 
@@ -447,6 +466,8 @@ def main():
                         "files are re-paired automatically, see align_columns, but the "
                         "printed names are cosmetic and only as right as this order is)")
     p.add_argument("--outdir", default=".")
+    p.add_argument("--column", action="store_true",
+                   help="single-column figures for the letter (3.4 in wide)")
     args = p.parse_args()
     os.makedirs(args.outdir, exist_ok=True)
 
@@ -590,7 +611,8 @@ def main():
                   os.path.join(args.outdir, "response_function.png"))
 
     plot_validation(plot_grid, plot_names, plot_raw, plot_fixed, plot_ref,
-                    os.path.join(args.outdir, "validation_transfer_heldout.png"), mb, mean_after)
+                    os.path.join(args.outdir, "validation_transfer_heldout.png"),
+                    mb, mean_after, column=args.column)
 
 
 if __name__ == "__main__":
