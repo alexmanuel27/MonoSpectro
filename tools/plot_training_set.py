@@ -27,7 +27,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 
 LO, HI = 420.0, 780.0
-SURFACE = "#fcfcfb"
+SURFACE = "#ffffff"
 INK, INK_MUTED = "#0b0b0b", "#52514e"
 GRID = "#e2e1dd"
 
@@ -100,6 +100,72 @@ def ink_from(hex_color, surface=SURFACE, target=3.6):
     return "#333333"
 
 
+def _srgb_to_lab(rgb):
+    """sRGB (0-1) to CIE L*a*b* under D65."""
+    c = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
+    M = np.array([[0.4124, 0.3576, 0.1805],
+                  [0.2126, 0.7152, 0.0722],
+                  [0.0193, 0.1192, 0.9505]])
+    xyz = (M @ c) / np.array([0.95047, 1.0, 1.08883])
+    f = np.where(xyz > 0.008856, np.cbrt(xyz), 7.787 * xyz + 16.0 / 116.0)
+    return np.array([116 * f[1] - 16, 500 * (f[0] - f[1]), 200 * (f[1] - f[2])])
+
+
+def _hex_to_rgb(h):
+    return np.array([int(h[i:i + 2], 16) for i in (1, 3, 5)], float) / 255
+
+
+def _rgb_to_hex(rgb):
+    rgb = np.clip(rgb, 0.0, 1.0)
+    return "#%02x%02x%02x" % tuple(int(round(c * 255)) for c in rgb)
+
+
+def boost_chroma(hex_color, target_chroma=62.0):
+    """Take a pale transmitted colour to a common chroma along its own hue.
+
+    The physically computed colour of a dilute solution sits close to white, so
+    the palest of the nine (red) renders as an indistinct pastel. Saturating at
+    constant luminance clips before it gets there, so lightness is allowed to
+    fall as far as needed to reach the target chroma; the hue is untouched, and
+    the least darkening that works is the one used.
+    """
+    rgb = _hex_to_rgb(hex_color)
+    for k in np.linspace(1.0, 0.50, 26):
+        base = rgb * k
+        lum = float(0.2126 * base[0] + 0.7152 * base[1] + 0.0722 * base[2])
+        for g in np.linspace(1.0, 3.2, 45):
+            cand = np.clip(lum + (base - lum) * g, 0.0, 1.0)
+            lab = _srgb_to_lab(cand)
+            if float(np.hypot(lab[1], lab[2])) >= target_chroma:
+                return _rgb_to_hex(cand)
+    return _rgb_to_hex(rgb)
+
+
+def separate(inks, surface=SURFACE, min_de=21.0, target=3.6):
+    """Spread perceptually adjacent inks apart in lightness.
+
+    Several colourings share a hue, so hue alone cannot label a panel. Each ink
+    that lands within min_de of one already assigned is stepped down in
+    lightness until it is distinguishable, subject to keeping its contrast
+    against the page above target.
+    """
+    srgb = _hex_to_rgb(surface)
+    out = []
+    for h in inks:
+        rgb = _hex_to_rgb(h)
+        for k in np.linspace(1.0, 0.30, 40):
+            cand = rgb * k
+            if _contrast(cand, srgb) < target:
+                break
+            lab = _srgb_to_lab(cand)
+            if all(np.linalg.norm(lab - _srgb_to_lab(_hex_to_rgb(o))) >= min_de
+                   for o in out):
+                rgb = cand
+                break
+        out.append(_rgb_to_hex(rgb))
+    return out
+
+
 def load_pair(data_dir, name):
     def read(side):
         d = pd.read_excel(os.path.join(data_dir, side, name + ".xlsx"))
@@ -120,6 +186,10 @@ def main():
     ymax = max(max(r[1].max(), d[1].max()) for r, d in pairs.values())
     ytop = float(np.ceil(ymax * 10) / 10)
 
+    vivid = [boost_chroma(spectrum_to_hex(*pairs[n][0])) for n in ORDER]
+    swatches = dict(zip(ORDER, separate(vivid, min_de=18.0, target=1.6)))
+    inks = dict(zip(ORDER, separate([ink_from(swatches[n]) for n in ORDER])))
+
     fig, axes = plt.subplots(3, 3, figsize=(6.8, 4.9), sharex=True, sharey=True)
     fig.patch.set_facecolor(SURFACE)
 
@@ -128,27 +198,21 @@ def main():
         ax.set_facecolor(SURFACE)
         ax.grid(True, color=GRID, lw=0.5, zorder=0)
         ax.set_axisbelow(True)
-        # put the swatch in whichever top corner the curves leave free
-        span = HI - LO
-        left_peak = ra[rw < LO + 0.45 * span].max(initial=0.0)
-        right_peak = ra[rw > HI - 0.45 * span].max(initial=0.0)
-        if left_peak <= right_peak:
-            sx, tx, ha = 0.05, 0.185, "left"
-        else:
-            sx, tx, ha = 0.95, 0.815, "right"
-        swatch = spectrum_to_hex(rw, ra)
-        ink = ink_from(swatch)
+        # the swatch and its label sit in the same corner on every panel; the
+        # y-axis carries enough headroom that no curve reaches into it
+        sx, tx, ha = 0.05, 0.185, "left"
+        swatch, ink = swatches[name], inks[name]
         ax.plot(rw, ra, color=ink, lw=1.7, solid_capstyle="round", zorder=3)
         ax.plot(dw, da, color=ink, lw=1.3, ls=(0, (3.5, 2)), alpha=0.85, zorder=2)
-        ax.add_patch(Rectangle((sx - (0.10 if ha == "right" else 0.0), 0.80),
-                               0.10, 0.15, transform=ax.transAxes,
+        ax.add_patch(Rectangle((sx, 0.845), 0.085, 0.115,
+                               transform=ax.transAxes,
                                facecolor=swatch, edgecolor=INK_MUTED,
                                linewidth=0.6, zorder=5))
-        ax.text(tx, 0.875, name, transform=ax.transAxes, fontsize=8.5,
+        ax.text(tx, 0.902, name, transform=ax.transAxes, fontsize=8.5,
                 color=INK, va="center", ha=ha, zorder=5)
 
         ax.set_xlim(LO, HI)
-        ax.set_ylim(0, ytop * 1.03)
+        ax.set_ylim(0, ytop * 1.15)
         ax.tick_params(labelsize=7.5, colors=INK_MUTED, length=3)
         for side in ("top", "right"):
             ax.spines[side].set_visible(False)
@@ -172,8 +236,7 @@ def main():
     surf = np.array([int(SURFACE[i:i + 2], 16) for i in (1, 3, 5)], float) / 255
     for n in ORDER:
         rw, ra = pairs[n][0]
-        sw = spectrum_to_hex(rw, ra)
-        ik = ink_from(sw)
+        sw, ik = swatches[n], inks[n]
         rgb = np.array([int(ik[i:i + 2], 16) for i in (1, 3, 5)], float) / 255
         print(f"  {n:6s} swatch {sw}  curve {ik}  contrast {_contrast(rgb, surf):.2f}:1")
 

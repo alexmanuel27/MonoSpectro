@@ -72,7 +72,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 INK, INK_SOFT = "#0b0b0b", "#52514e"
-GRID, SURFACE = "#e6e5e1", "#fcfcfb"
+GRID, SURFACE = "#e6e5e1", "#ffffff"
 C_REF, C_RAW, C_FIX = "#52514e", "#eb6834", "#2a78d6"
 
 
@@ -360,7 +360,7 @@ def plot_response(grid_c, a_c, b_c, grid_rf, a_rf, b_rf, outfile):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    SURFACE, INK, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e2e1dd"
+    SURFACE, INK, MUTED, GRID = "#ffffff", "#0b0b0b", "#52514e", "#e2e1dd"
     C_JOINT, C_PER = "#2a78d6", "#eb6834"
 
     fig, axes = plt.subplots(2, 1, figsize=(3.5, 3.4), sharex=True)
@@ -381,9 +381,9 @@ def plot_response(grid_c, a_c, b_c, grid_rf, a_rf, b_rf, outfile):
             ax.spines[sd].set_color(GRID)
     axes[1].set_xlabel("Wavelength (nm)", fontsize=8.5, color=MUTED)
     axes[0].legend(handles=[
-        Line2D([], [], color=C_JOINT, lw=1.8, label="joint Chebyshev (4 coefficients)"),
+        Line2D([], [], color=C_JOINT, lw=1.8, label="joint fit (4 coefficients)"),
         Line2D([], [], color=C_PER, lw=1.1, ls=(0, (3.5, 2)),
-               label="per wavelength (722)")],
+               label="per wavelength (722 coefficients)")],
         loc="best", frameon=False, fontsize=7.2, labelcolor=INK)
     fig.tight_layout(pad=0.4)
     fig.savefig(outfile, dpi=300, facecolor=SURFACE)
@@ -407,10 +407,11 @@ def plot_validation(grid, names, raw, fixed, ref, outfile, mean_before, mean_aft
         ax.grid(True, axis="y", color=GRID, linewidth=1)
         ax.set_axisbelow(True)
         ax.tick_params(colors=INK_SOFT, labelsize=9, length=0)
-        ax.plot(grid, y, color=C_REF, linewidth=2, linestyle=(0, (5, 3)), label="Reference instrument")
+        ax.plot(grid, y, color=C_REF, linewidth=1.9, linestyle=(0, (4, 2.6)),
+                label="Reference instrument (dashed)")
         ax.plot(grid, r, color=C_RAW, linewidth=1.6, alpha=0.85, label="MonoSpectro, uncorrected")
         ax.plot(grid, f, color=C_FIX, linewidth=2, label="MonoSpectro, corrected")
-        ax.set_title(nm, fontsize=11, color=INK, loc="left", fontweight="bold", pad=8)
+        ax.set_title(nm, fontsize=10.5, color=INK, loc="left", pad=6)
         ax.text(0.98, 0.94, f"RMSE {rmse(r, y):.2f} → {rmse(f, y):.2f}", transform=ax.transAxes,
                 ha="right", va="top", fontsize=9, color=INK_SOFT)
         ax.set_xlim(grid[0], grid[-1])
@@ -421,16 +422,11 @@ def plot_validation(grid, names, raw, fixed, ref, outfile, mean_before, mean_aft
     for col in range(ncols):
         axes[nrows - 1][col].set_xlabel("Wavelength (nm)", fontsize=10, color=INK_SOFT)
 
-    fig.suptitle("Calibration transfer, held-out samples", fontsize=14, color=INK,
-                 fontweight="bold", x=0.05, ha="left", y=0.978)
-    fig.text(0.05, 0.936,
-             f"Response function fitted on a different session and a different set of dyes.  "
-             f"Mean RMSE {mean_before:.2f} → {mean_after:.2f}.",
-             fontsize=9.5, color=INK_SOFT, ha="left")
     h, l = flat[0].get_legend_handles_labels()
-    fig.legend(h, l, loc="upper right", bbox_to_anchor=(0.985, 0.982), frameon=False,
-               fontsize=9, labelcolor=INK_SOFT, ncols=3, handlelength=2.2, columnspacing=1.4)
-    fig.tight_layout(rect=(0.015, 0.01, 0.985, 0.90))
+    fig.legend(h, l, loc="upper center", bbox_to_anchor=(0.5, 1.0), frameon=False,
+               fontsize=9.5, labelcolor=INK_SOFT, ncols=3, handlelength=3.4,
+               columnspacing=1.8)
+    fig.tight_layout(rect=(0.015, 0.01, 0.985, 0.945))
     fig.subplots_adjust(hspace=0.32)
     fig.savefig(outfile, dpi=200, facecolor=SURFACE)
     plt.close(fig)
