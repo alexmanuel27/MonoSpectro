@@ -347,7 +347,7 @@ def leave_one_out_cheb(X, Y, grid, degree):
     return float(np.mean(errs)), errs
 
 
-def plot_response(grid_c, a_c, b_c, grid_rf, a_rf, b_rf, outfile):
+def plot_response(grid_c, a_c, b_c, grid_rf, a_rf, b_rf, outfile, column=False):
     """The fitted response function: what the correction actually is.
 
     Both curves describe the same relation, A_ref = a(lambda)*A_dev + b(lambda).
@@ -363,7 +363,9 @@ def plot_response(grid_c, a_c, b_c, grid_rf, a_rf, b_rf, outfile):
     SURFACE, INK, MUTED, GRID = "#ffffff", "#0b0b0b", "#52514e", "#e2e1dd"
     C_JOINT, C_PER = "#2a78d6", "#eb6834"
 
-    fig, axes = plt.subplots(2, 1, figsize=(3.5, 3.4), sharex=True)
+    # compact version for the letter: same panels, less vertical room
+    FG, LB, TK, LG = ((3.4, 2.25), 6.2, 5.4, 5.4) if column else ((3.5, 3.4), 8.5, 7.5, 7.2)
+    fig, axes = plt.subplots(2, 1, figsize=FG, sharex=True)
     fig.patch.set_facecolor(SURFACE)
     panels = ((axes[0], a_rf, a_c, r"gain $a(\lambda)$"),
               (axes[1], b_rf, b_c, r"offset $b(\lambda)$"))
@@ -373,18 +375,20 @@ def plot_response(grid_c, a_c, b_c, grid_rf, a_rf, b_rf, outfile):
         ax.set_axisbelow(True)
         ax.plot(grid_rf, per, color=C_PER, lw=1.1, ls=(0, (3.5, 2)), zorder=2)
         ax.plot(grid_c, joint, color=C_JOINT, lw=1.8, zorder=3)
-        ax.set_ylabel(ylab, fontsize=8.5, color=MUTED)
-        ax.tick_params(labelsize=7.5, colors=MUTED, length=3)
+        ax.set_ylabel(ylab, fontsize=LB, color=MUTED)
+        ax.tick_params(labelsize=TK, colors=MUTED, length=2.5)
+        if column:
+            ax.locator_params(axis="y", nbins=4)
         for sd in ("top", "right"):
             ax.spines[sd].set_visible(False)
         for sd in ("left", "bottom"):
             ax.spines[sd].set_color(GRID)
-    axes[1].set_xlabel("Wavelength (nm)", fontsize=8.5, color=MUTED)
+    axes[1].set_xlabel("Wavelength (nm)", fontsize=LB, color=MUTED)
     axes[0].legend(handles=[
         Line2D([], [], color=C_JOINT, lw=1.8, label="joint fit (4 coefficients)"),
         Line2D([], [], color=C_PER, lw=1.1, ls=(0, (3.5, 2)),
                label="per wavelength (722 coefficients)")],
-        loc="best", frameon=False, fontsize=7.2, labelcolor=INK)
+        loc="best", frameon=False, fontsize=LG, labelcolor=INK)
     fig.tight_layout(pad=0.4)
     fig.savefig(outfile, dpi=300, facecolor=SURFACE)
     print("wrote", outfile)
@@ -608,7 +612,8 @@ def main():
     Tm = model_c._basis(grid_c)
     plot_response(grid_c, Tm @ model_c.ca, Tm @ model_c.cb,
                   grid, model.P[0], model.P[1],
-                  os.path.join(args.outdir, "response_function.png"))
+                  os.path.join(args.outdir, "response_function.png"),
+                  column=args.column)
 
     plot_validation(plot_grid, plot_names, plot_raw, plot_fixed, plot_ref,
                     os.path.join(args.outdir, "validation_transfer_heldout.png"),
